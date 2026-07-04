@@ -25,7 +25,6 @@ def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
         return pd.DataFrame()
 
 def analyze_trend(df):
-    # คำนวณอินดิเคเตอร์
     df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
     df['ema_50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
     
@@ -34,22 +33,14 @@ def analyze_trend(df):
     df['macd_signal'] = macd.macd_signal()
 
     latest = df.iloc[-1]
-    signal = "WAIT"
     
-    # เงื่อนไขใหม่: เพิ่มความเข้มงวดเพื่อลดโอกาสผิด
-    # UP: ราคาต้องอยู่เหนือ EMA50 + MACD ตัดขึ้น + RSI อยู่ในโซนโมเมนตัมขาขึ้น
-    if (latest['close'] > latest['ema_50'] and 
-        latest['macd_line'] > latest['macd_signal'] and 
-        50 < latest['rsi'] < 60):
-        signal = "UP 🟢"
-        
-    # DOWN: ราคาต้องอยู่ใต้ EMA50 + MACD ตัดลง + RSI อยู่ในโซนโมเมนตัมขาลง
-    elif (latest['close'] < latest['ema_50'] and 
-          latest['macd_line'] < latest['macd_signal'] and 
-          40 < latest['rsi'] < 50):
-        signal = "DOWN 🔴"
-        
-    return signal, latest['close'], latest['rsi']
+    # ปรับให้ส่งสัญญาณได้กว้างขึ้น (ไม่คัดออกแล้ว)
+    if (latest['close'] > latest['ema_50'] and latest['macd_line'] > latest['macd_signal']):
+        return "UP 🟢", latest['close'], latest['rsi']
+    elif (latest['close'] < latest['ema_50'] and latest['macd_line'] < latest['macd_signal']):
+        return "DOWN 🔴", latest['close'], latest['rsi']
+    else:
+        return "NEUTRAL ⚪", latest['close'], latest['rsi']
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -57,37 +48,30 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอทปรับกลยุทธ์เพิ่มความแม่นยำ (Signal Filter) เริ่มทำงานแล้ว! 🚀"
-    send_telegram_message(startup_msg)
+    send_telegram_message("✅ บอทกลับมาส่งสัญญาณทุกรอบแล้วครับ! พร้อมใช้งาน 🚀")
     
     while True:
         now = datetime.now()
         
-        # ปรับเวลาเตือน: นาทีที่ 0/5 วินาทีที่ 40 (ช้าลง 40 วิจากจุดเริ่มแรก)
+        # เงื่อนไขเวลาที่คุณต้องการ: นาทีที่ 0/5 วินาทีที่ 40
         if now.minute % 5 == 0 and now.second == 40: 
             try:
                 df = get_binance_data()
-                
-                if df.empty:
-                    time.sleep(60)
-                    continue
+                if not df.empty:
+                    signal, price, rsi = analyze_trend(df)
                     
-                signal, price, rsi = analyze_trend(df)
-                
-                if signal != "WAIT":
+                    # ส่งแจ้งเตือนทุกรอบไม่ว่าจะเป็นสัญญาณอะไร
                     msg = (
-                        f"🔮 PancakeSwap Prediction (High Accuracy)\n"
+                        f"🔮 PancakeSwap Prediction\n"
                         f"📍 สัญญาณ: {signal}\n"
-                        f"💰 ราคา BNB: ${price:.2f}\n"
+                        f"💰 ราคา: ${price:.2f}\n"
                         f"📊 RSI: {rsi:.2f}\n"
                         f"⏳ รีบลงเดิมพันก่อนปุ่มล็อค!"
                     )
                     send_telegram_message(msg)
-                else:
-                    # กรณีไม่ผ่านเงื่อนไขจะไม่ส่งข้อความ เพื่อคัดเฉพาะสัญญาณที่แม่นยำจริงๆ
-                    print(f"[{now.strftime('%H:%M:%S')}] สัญญาณไม่ชัดเจน (Skipped).")
                     
-                time.sleep(70) # เว้นช่วงหลังส่งสัญญาณ
+                # เว้นช่วง 70 วินาที ตามเงื่อนไขคุณ
+                time.sleep(70) 
                 
             except Exception as e:
                 print(f"Error: {e}")
