@@ -4,26 +4,33 @@ import pandas as pd
 import ta
 from datetime import datetime
 import os
+from web3 import Web3
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ---------------------------------------------------------
-# ⚙️ ตั้งค่าเวลาแจ้งเตือน (ปรับตัวเลขตรงนี้ถ้าเวลาเว็บเคลื่อน)
+# 🔗 ตั้งค่า Web3 เชื่อมต่อกับ Binance Smart Chain (BSC)
 # ---------------------------------------------------------
-# ใส่เลข 0, 1, 2, 3 หรือ 4 (เช่น ถ้าเว็บล็อกตอนนาทีที่ 27 (27 หาร 5 เหลือเศษ 2) ให้เตือนก่อน 1 นาที คือเศษ 1)
-TRIGGER_MINUTE_REMAINDER = 1  
-TRIGGER_SECOND = 30           # วินาทีที่จะให้เตือน (แนะนำ 30)
-# ---------------------------------------------------------
+BSC_RPC = "https://bsc-dataseed.binance.org/"
+w3 = Web3(Web3.HTTPProvider(BSC_RPC))
+
+# ที่อยู่ Contract ของ PancakeSwap Prediction V2 (BNB)
+CONTRACT_ADDRESS = w3.to_checksum_address("0x18B2A6826674A0A57CB7fA9Fdeb9E955353cE530")
+
+# ABI เฉพาะฟังก์ชันที่จำเป็น (ลดขนาดโค้ด ไม่ให้รุงรัง)
+ABI = '[{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"epochs","outputs":[{"internalType":"uint256","name":"epoch"},{"internalType":"uint256","name":"startTimestamp"},{"internalType":"uint256","name":"lockTimestamp"},{"internalType":"uint256","name":"closeTimestamp"},{"internalType":"int256","name":"lockPrice"},{"internalType":"int256","name":"closePrice"},{"internalType":"uint256","name":"lockOracleId"},{"internalType":"uint256","name":"closeOracleId"},{"internalType":"uint256","name":"totalAmount"},{"internalType":"uint256","name":"bullAmount"},{"internalType":"uint256","name":"bearAmount"},{"internalType":"uint256","name":"rewardBaseCalAmount"},{"internalType":"uint256","name":"rewardAmount"},{"internalType":"bool","name":"oracleCalled"}],"stateMutability":"view","type":"function"}]'
+contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
+
+# ตั้งค่าให้เตือนล่วงหน้าก่อนเวลา Lock จริงบนบล็อกเชน 30 วินาที
+NOTIFY_BEFORE_SECONDS = 30
 
 def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
         response = requests.get(url).json()
         if isinstance(response, dict) and 'code' in response:
-            print(f"Binance API Error: {response}")
             return pd.DataFrame()
-            
         df = pd.DataFrame(response, columns=[
             'timestamp', 'open', 'high', 'low', 'close', 'volume',
             'close_time', 'quote_asset_volume', 'trades',
@@ -31,8 +38,7 @@ def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
         ])
         df['close'] = pd.to_numeric(df['close'])
         return df
-    except Exception as e:
-        print(f"Fetch Error: {e}")
+    except:
         return pd.DataFrame()
 
 def analyze_trend(df):
@@ -53,7 +59,6 @@ def analyze_trend(df):
         latest['macd_line'] > latest['macd_signal'] and 
         45 <= latest['rsi'] <= 65):
         signal = "UP 🟢"
-        
     elif (latest['close'] < latest['ema_50'] and 
           latest['ema_9'] < latest['ema_21'] and 
           latest['macd_line'] < latest['macd_signal'] and 
@@ -65,54 +70,72 @@ def analyze_trend(df):
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text}
-    res = requests.post(url, data=payload).json()
-    if not res.get("ok"):
-        print(f"Telegram Error: {res}")
+    requests.post(url, data=payload)
 
 def main():
-    startup_msg = f"✅ บอทปรับเวลาใหม่เริ่มทำงานแล้ว!\nตั้งค่าเตือนที่เศษนาทีที่: {TRIGGER_MINUTE_REMAINDER} วินาทีที่: {TRIGGER_SECOND} 🚀"
+    startup_msg = "✅ บอท PancakeSwap อัปเกรด (Web3) ล็อคเป้าเวลาบล็อกเชน เริ่มทำงานแล้ว! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Startup message sent.")
+    print("Bot started with Web3 tracking.")
+    
+    last_signaled_epoch = 0
     
     while True:
-        now = datetime.now()
-        # ดึงค่าเวลามาจากตั้งค่าด้านบน
-        if now.minute % 5 == TRIGGER_MINUTE_REMAINDER and now.second == TRIGGER_SECOND:
-            try:
-                df = get_binance_data()
+        try:
+            # 1. เช็ครอบปัจจุบัน (Epoch) จาก Smart Contract
+            current_epoch = contract.functions.currentEpoch().call()
+            
+            # ถ้าเป็นรอบใหม่ที่ยังไม่เคยส่งสัญญาณ
+            if current_epoch != last_signaled_epoch:
                 
-                if df.empty:
+                # 2. ดึงข้อมูลของรอบนี้ เพื่อเอาเวลา lockTimestamp
+                epoch_data = contract.functions.epochs(current_epoch).call()
+                lock_timestamp = epoch_data[2] # ตำแหน่งที่ 2 ในข้อมูลคือ lockTimestamp
+                
+                # 3. คำนวณเวลาที่เหลือ (เวลา Lock ลบด้วย เวลาปัจจุบัน)
+                current_time = int(time.time())
+                time_remaining = lock_timestamp - current_time
+                
+                # 4. ลั่นไกเมื่อเวลาเหลือน้อยกว่าหรือเท่ากับ NOTIFY_BEFORE_SECONDS (30 วินาที)
+                if 0 < time_remaining <= NOTIFY_BEFORE_SECONDS:
+                    df = get_binance_data()
+                    
+                    if not df.empty:
+                        signal, price, rsi = analyze_trend(df)
+                        
+                        # คำนวณเวลาที่คุณมีกดจริงๆ (เวลาที่เหลือ - 10 วินาทีที่เว็บจะล็อค)
+                        action_time = max(1, time_remaining - 10) 
+                        
+                        if signal != "WAIT":
+                            msg = (
+                                f"🔮 PancakeSwap Prediction (รอบ: #{current_epoch})\n"
+                                f"📍 สัญญาณ: {signal}\n"
+                                f"💰 ราคา BNB: ${price:.2f}\n"
+                                f"📊 RSI (1m): {rsi:.2f}\n"
+                                f"⏳ รีบกดภายใน {action_time} วินาที!"
+                            )
+                        else:
+                            msg = (
+                                f"⏸ PancakeSwap Prediction (รอบ: #{current_epoch})\n"
+                                f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
+                                f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
+                                f"📊 RSI (1m): {rsi:.2f}"
+                            )
+                        send_telegram_message(msg)
+                        print(f"Sent Signal for Epoch #{current_epoch}")
+                    
+                    # บันทึกว่ารอบนี้ทำหน้าที่เสร็จแล้ว
+                    last_signaled_epoch = current_epoch
+                    
+                    # หลับยาว 60 วินาที เพื่อไม่ให้เช็คซ้ำในช่วงที่เว็บกำลังคำนวณผล
                     time.sleep(60)
                     continue
                     
-                signal, price, rsi = analyze_trend(df)
-                
-                if signal != "WAIT":
-                    msg = (
-                        f"🔮 PancakeSwap 5m Prediction\n"
-                        f"📍 สัญญาณ: {signal}\n"
-                        f"💰 ราคา BNB: ${price:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}\n"
-                        f"⏳ รีบลงเดิมพันภายใน 20 วินาที!"
-                    )
-                    send_telegram_message(msg)
-                    print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
-                else:
-                    msg = (
-                        f"⏸ PancakeSwap 5m Prediction\n"
-                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
-                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}"
-                    )
-                    send_telegram_message(msg)
-                    print(f"[{now.strftime('%H:%M:%S')}] แจ้งเตือนข้ามรอบนี้ (Skipped).")
-                    
-                time.sleep(60)
-            except Exception as e:
-                print(f"Error: {e}")
-                time.sleep(5)
-        else:
-            time.sleep(1)
+        except Exception as e:
+            print(f"Error fetching Web3/Data: {e}")
+            time.sleep(5)
+            
+        # เช็คเวลาจากบล็อกเชนทุกๆ 2 วินาที
+        time.sleep(2)
 
 if __name__ == "__main__":
     main()
