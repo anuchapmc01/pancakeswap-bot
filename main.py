@@ -9,7 +9,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
 # 🛠 ปรับเวลากลับมาที่ -144 เพื่อให้จังหวะแจ้งเตือนตรงล็อกเดิมที่คุณโอเคแล้ว
-OFFSET_SECONDS = -144 
+OFFSET_SECONDS = -180
 
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
