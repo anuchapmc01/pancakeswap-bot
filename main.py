@@ -25,9 +25,8 @@ def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
         return pd.DataFrame()
 
 def analyze_trend(df):
+    # คำนวณอินดิเคเตอร์
     df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-    df['ema_9'] = ta.trend.EMAIndicator(df['close'], window=9).ema_indicator()
-    df['ema_21'] = ta.trend.EMAIndicator(df['close'], window=21).ema_indicator()
     df['ema_50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
     
     macd = ta.trend.MACD(df['close'])
@@ -37,15 +36,17 @@ def analyze_trend(df):
     latest = df.iloc[-1]
     signal = "WAIT"
     
+    # เงื่อนไขใหม่: เพิ่มความเข้มงวดเพื่อลดโอกาสผิด
+    # UP: ราคาต้องอยู่เหนือ EMA50 + MACD ตัดขึ้น + RSI อยู่ในโซนโมเมนตัมขาขึ้น
     if (latest['close'] > latest['ema_50'] and 
-        latest['ema_9'] > latest['ema_21'] and 
         latest['macd_line'] > latest['macd_signal'] and 
-        45 <= latest['rsi'] <= 65):
+        50 < latest['rsi'] < 60):
         signal = "UP 🟢"
+        
+    # DOWN: ราคาต้องอยู่ใต้ EMA50 + MACD ตัดลง + RSI อยู่ในโซนโมเมนตัมขาลง
     elif (latest['close'] < latest['ema_50'] and 
-          latest['ema_9'] < latest['ema_21'] and 
           latest['macd_line'] < latest['macd_signal'] and 
-          35 <= latest['rsi'] <= 55):
+          40 < latest['rsi'] < 50):
         signal = "DOWN 🔴"
         
     return signal, latest['close'], latest['rsi']
@@ -56,13 +57,13 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอทปรับเวลาเตือนช้าขึ้นอีก 30 วิ (รวม 40 วิจากจุดเดิม) เริ่มทำงานแล้ว! 🚀"
+    startup_msg = "✅ บอทปรับกลยุทธ์เพิ่มความแม่นยำ (Signal Filter) เริ่มทำงานแล้ว! 🚀"
     send_telegram_message(startup_msg)
     
     while True:
         now = datetime.now()
         
-        # ปรับมาเตือนที่วินาทีที่ 40 ของนาทีที่ 5 หรือ 0
+        # ปรับเวลาเตือน: นาทีที่ 0/5 วินาทีที่ 40 (ช้าลง 40 วิจากจุดเริ่มแรก)
         if now.minute % 5 == 0 and now.second == 40: 
             try:
                 df = get_binance_data()
@@ -75,24 +76,18 @@ def main():
                 
                 if signal != "WAIT":
                     msg = (
-                        f"🔮 PancakeSwap 5m Prediction\n"
+                        f"🔮 PancakeSwap Prediction (High Accuracy)\n"
                         f"📍 สัญญาณ: {signal}\n"
                         f"💰 ราคา BNB: ${price:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}\n"
+                        f"📊 RSI: {rsi:.2f}\n"
                         f"⏳ รีบลงเดิมพันก่อนปุ่มล็อค!"
                     )
                     send_telegram_message(msg)
                 else:
-                    msg = (
-                        f"⏸ PancakeSwap 5m Prediction\n"
-                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
-                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}"
-                    )
-                    send_telegram_message(msg)
+                    # กรณีไม่ผ่านเงื่อนไขจะไม่ส่งข้อความ เพื่อคัดเฉพาะสัญญาณที่แม่นยำจริงๆ
+                    print(f"[{now.strftime('%H:%M:%S')}] สัญญาณไม่ชัดเจน (Skipped).")
                     
-                # เว้นช่วง 70 วินาที เพื่อป้องกันการทำงานทับซ้อนรอยต่อเว็บ
-                time.sleep(70) 
+                time.sleep(70) # เว้นช่วงหลังส่งสัญญาณ
                 
             except Exception as e:
                 print(f"Error: {e}")
