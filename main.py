@@ -5,19 +5,19 @@ import ta
 from datetime import datetime
 import os
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+# ไม่ต้องใช้ geth_poa_middleware แล้ว ตัดปัญหาเวอร์ชันชนกัน
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ---------------------------------------------------------
-# 🔗 ระบบสลับเซิร์ฟเวอร์อัตโนมัติ (สู้กับการโดนบล็อก IP)
+# 🔗 ระบบสลับเซิร์ฟเวอร์อัตโนมัติ (RPC Rotator) 
 # ---------------------------------------------------------
 RPC_LIST = [
+    "https://bsc.publicnode.com",
     "https://bsc-dataseed1.defibit.io",
     "https://bsc-dataseed1.ninicoin.io",
     "https://1rpc.io/bnb",
-    "https://bsc.publicnode.com",
     "https://rpc.ankr.com/bsc",
     "https://bsc-dataseed.binance.org/"
 ]
@@ -28,8 +28,7 @@ ABI = '[{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256",
 
 def get_contract(rpc_url):
     w3 = Web3(Web3.HTTPProvider(rpc_url))
-    # จำเป็นสำหรับ BSC เพื่อป้องกัน Error อ่านบล็อกเชนผิดพลาด
-    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    # ตัด w3.middleware_onion.inject ออกไปเลย ใช้งานได้เพียวๆ
     contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDRESS), abi=ABI)
     return w3, contract
 
@@ -88,7 +87,7 @@ def send_telegram_message(text):
 def main():
     global current_rpc_index, w3, contract
     
-    startup_msg = "✅ บอทปรับปรุงระบบ (สลับเซิร์ฟเวอร์อัตโนมัติ) เริ่มทำงานแล้ว!\nพร้อมชนทุกการบล็อก 🚀"
+    startup_msg = "✅ บอท Web3 (สลับเซิร์ฟเวอร์อัตโนมัติ) แก้ Error สมบูรณ์ เริ่มทำงานแล้ว! 🚀"
     send_telegram_message(startup_msg)
     print(f"Bot started. Connected to {RPC_LIST[current_rpc_index]}")
     
@@ -129,13 +128,16 @@ def main():
                             )
                         send_telegram_message(msg)
                         print(f"[{datetime.now().strftime('%H:%M:%S')}] Sent Signal for Epoch #{current_epoch}")
+                    else:
+                        error_msg = f"⚠️ ดึงกราฟ Binance ไม่สำเร็จในรอบ #{current_epoch} ระบบขอข้ามไปก่อน"
+                        send_telegram_message(error_msg)
+                        print(error_msg)
                     
                     last_signaled_epoch = current_epoch
                     time.sleep(60)
                     continue
                     
         except Exception as e:
-            # ถ้าระบบโดนบล็อก จะทำการสลับไปเซิร์ฟเวอร์สำรองตัวถัดไปทันที
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}")
             current_rpc_index = (current_rpc_index + 1) % len(RPC_LIST)
             print(f"🔄 กำลังสลับเซิร์ฟเวอร์บล็อกเชนไปที่: {RPC_LIST[current_rpc_index]}")
@@ -145,7 +147,7 @@ def main():
             except:
                 pass
             
-            time.sleep(2) # พักหายใจก่อนลองใหม่
+            time.sleep(2)
             continue
             
         time.sleep(2)
