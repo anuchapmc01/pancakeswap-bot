@@ -8,8 +8,6 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-last_signal = "NEUTRAL"
-
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
     try:
@@ -27,10 +25,7 @@ def get_binance_data(interval="1m", limit=100):
         df['macd_signal'] = macd.macd_signal()
         stoch             = ta.momentum.StochasticOscillator(df['h'], df['l'], df['close'])
         df['stoch']       = stoch.stoch()
-
-        # ✅ Volume MA20 — กรองตลาดเงียบ
         df['vol_ma20']    = df['v'].rolling(window=20).mean()
-
         return df
     except Exception as e:
         print(f"[ERROR] get_binance_data({interval}): {e}")
@@ -44,97 +39,88 @@ def get_signal(df_1m, df_3m):
     if any(pd.isna(l1[c]) for c in required) or pd.isna(l3['ema_50']):
         return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ (NaN)"
 
-    price = l1['close']
-
-    # ✅ Volume ต้องสูงกว่าค่าเฉลี่ย (ตลาดมีแรง)
+    price  = l1['close']
     vol_ok = l1['v'] > l1['vol_ma20']
-
-    # ✅ Trend 1m และ 3m ต้องไปทางเดียวกัน
     trend_up   = l1['close'] > l1['ema_50'] and l3['close'] > l3['ema_50']
     trend_down = l1['close'] < l1['ema_50'] and l3['close'] < l3['ema_50']
 
-    # === UP ===
-    if (trend_up and
-        40 < l1['rsi'] < 72 and
-        l1['macd'] > l1['macd_signal'] and
-        l1['stoch'] < 78 and
-        vol_ok):
-
+    if (trend_up and 40 < l1['rsi'] < 72 and
+        l1['macd'] > l1['macd_signal'] and l1['stoch'] < 78 and vol_ok):
         reason = "\n".join([
-            f"✅ Trend UP ทั้ง 1m & 3m",
-            f"✅ RSI: {l1['rsi']:.1f} (40-72)",
+            f"✅ Trend UP (1m & 3m)",
+            f"✅ RSI: {l1['rsi']:.1f}",
             f"✅ MACD: Bullish",
-            f"✅ Stoch: {l1['stoch']:.1f} < 78",
-            f"✅ Volume: {l1['v']:.0f} > MA20 {l1['vol_ma20']:.0f}"
+            f"✅ Stoch: {l1['stoch']:.1f}",
+            f"✅ Volume: {l1['v']:.0f} > MA {l1['vol_ma20']:.0f}"
         ])
         return "UP 🟢", price, reason
 
-    # === DOWN ===
-    elif (trend_down and
-          28 < l1['rsi'] < 58 and
-          l1['macd'] < l1['macd_signal'] and
-          l1['stoch'] > 22 and
-          vol_ok):
-
+    elif (trend_down and 28 < l1['rsi'] < 58 and
+          l1['macd'] < l1['macd_signal'] and l1['stoch'] > 22 and vol_ok):
         reason = "\n".join([
-            f"✅ Trend DOWN ทั้ง 1m & 3m",
-            f"✅ RSI: {l1['rsi']:.1f} (28-58)",
+            f"✅ Trend DOWN (1m & 3m)",
+            f"✅ RSI: {l1['rsi']:.1f}",
             f"✅ MACD: Bearish",
-            f"✅ Stoch: {l1['stoch']:.1f} > 22",
-            f"✅ Volume: {l1['v']:.0f} > MA20 {l1['vol_ma20']:.0f}"
+            f"✅ Stoch: {l1['stoch']:.1f}",
+            f"✅ Volume: {l1['v']:.0f} > MA {l1['vol_ma20']:.0f}"
         ])
         return "DOWN 🔴", price, reason
 
-    # บอกว่าติดเงื่อนไขอะไร (ช่วย debug)
+    # NEUTRAL — บอกเหตุผลละเอียด
     miss = []
-    if not vol_ok:       miss.append(f"Volume ต่ำ ({l1['v']:.0f} < MA {l1['vol_ma20']:.0f})")
-    if not trend_up and not trend_down: miss.append("Trend 1m/3m ไม่สอดคล้องกัน")
-    if not (40 < l1['rsi'] < 72) and not (28 < l1['rsi'] < 58):
-        miss.append(f"RSI อยู่นอก zone ({l1['rsi']:.1f})")
+    if not vol_ok:
+        miss.append(f"Volume ต่ำ ({l1['v']:.0f} < MA {l1['vol_ma20']:.0f})")
+    if not trend_up and not trend_down:
+        miss.append(f"Trend ขัดแย้ง (1m vs 3m)")
+    if l1['macd'] == l1['macd_signal']:
+        miss.append("MACD ไม่ชัด")
+    miss.append(f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}")
 
-    return "NEUTRAL ⚪", price, "ไม่ผ่าน: " + ", ".join(miss) if miss else "เงื่อนไขไม่ครบ"
+    return "NEUTRAL ⚪", price, "⏸ รอสัญญาณ:\n" + "\n".join(miss)
 
 def send_telegram_message(text):
     try:
-        requests.post(
+        r = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             data={'chat_id': TELEGRAM_CHAT_ID, 'text': text},
             timeout=10
         )
+        print(f"[TG] {r.status_code} | {text[:50]}")
     except Exception as e:
         print(f"[ERROR] Telegram: {e}")
 
 def main():
-    global last_signal
-    send_telegram_message("✅ Bot v3 (Volume + Relaxed Threshold) เริ่มงานแล้ว! 🚀")
+    send_telegram_message("✅ Bot v4 เริ่มงานแล้ว — ส่งสัญญาณทุก 5 นาที 🚀")
 
     while True:
         now = datetime.now()
-        if now.minute % 5 == 0 and 40 <= now.second <= 42:
-            try:
-                df1 = get_binance_data("1m", limit=100)
-                df3 = get_binance_data("3m", limit=100)
+        print(f"[LOOP] {now.strftime('%H:%M:%S')} — กำลังดึงข้อมูล...")
 
-                if not df1.empty and not df3.empty:
-                    signal, price, reason = get_signal(df1, df3)
+        try:
+            df1 = get_binance_data("1m", limit=100)
+            df3 = get_binance_data("3m", limit=100)
 
-                    if signal != last_signal or "UP" in signal or "DOWN" in signal:
-                        msg = (
-                            f"🔮 BNB/USDT — 5min Prediction\n"
-                            f"📍 สัญญาณ: {signal}\n"
-                            f"💰 ราคา: ${price:.4f}\n"
-                            f"📊 เหตุผล:\n{reason}\n"
-                            f"⏳ เวลา: {now.strftime('%H:%M:%S')}"
-                        )
-                        send_telegram_message(msg)
-                        last_signal = signal
+            if not df1.empty and not df3.empty:
+                signal, price, reason = get_signal(df1, df3)
 
-                time.sleep(70)
-            except Exception as e:
-                print(f"[ERROR] main loop: {e}")
-                time.sleep(5)
-        else:
-            time.sleep(1)
+                msg = (
+                    f"🔮 BNB/USDT — 5min Prediction\n"
+                    f"📍 สัญญาณ: {signal}\n"
+                    f"💰 ราคา: ${price:.4f}\n"
+                    f"📊 {reason}\n"
+                    f"⏳ เวลา: {now.strftime('%H:%M:%S')}"
+                )
+                send_telegram_message(msg)
+            else:
+                send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ [{now.strftime('%H:%M:%S')}]")
+
+        except Exception as e:
+            print(f"[ERROR] main loop: {e}")
+            send_telegram_message(f"❌ Error: {e}")
+
+        # ✅ รอ 5 นาทีตรงๆ ไม่ต้องเช็คเวลาเลย
+        print("[LOOP] รอ 5 นาที...")
+        time.sleep(300)
 
 if __name__ == "__main__":
     main()
