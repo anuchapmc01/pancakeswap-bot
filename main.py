@@ -58,17 +58,21 @@ def analyze_trend(df):
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text}
-    res = requests.post(url, data=payload).json()
-    if not res.get("ok"):
-        print(f"Telegram Error: {res}")
+    try:
+        res = requests.post(url, data=payload).json()
+        if not res.get("ok"):
+            print(f"Telegram Error: {res}")
+    except Exception as e:
+        print(f"Telegram Exception: {e}")
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap (แจ้งเตือนทุกรอบ) เริ่มทำงานแล้ว!\nระบบกำลังสแตนด์บายรอจับสัญญาณครับ 🚀"
+    startup_msg = "✅ บอท PancakeSwap (ปรับจังหวะเว้น 70 วินาที) เริ่มทำงานแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Startup message sent.")
+    print("Bot started and standby.")
     
     while True:
         now = datetime.now()
+        # เช็คทุกรอบเวลาที่วินาทีที่ 30
         if now.minute % 5 == 4 and now.second == 30:
             try:
                 df = get_binance_data()
@@ -91,7 +95,6 @@ def main():
                     send_telegram_message(msg)
                     print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
                 else:
-                    # เพิ่มส่วนนี้เข้าไป เพื่อแจ้งเตือนตอน Skip
                     msg = (
                         f"⏸ PancakeSwap 5m Prediction\n"
                         f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
@@ -100,8 +103,10 @@ def main():
                     )
                     send_telegram_message(msg)
                     print(f"[{now.strftime('%H:%M:%S')}] แจ้งเตือนข้ามรอบนี้ (Skipped).")
-                    
-                time.sleep(60)
+                
+                # หลังจากแจ้งเตือนเสร็จ ให้บอทหลับไป 70 วินาที เพื่อเว้นช่วงเว็บปิด/เริ่มรอบใหม่
+                time.sleep(70)
+                
             except Exception as e:
                 print(f"Error: {e}")
                 time.sleep(5)
