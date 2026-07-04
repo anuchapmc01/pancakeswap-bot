@@ -5,28 +5,17 @@ import ta
 from datetime import datetime
 import os
 from web3 import Web3
-
-# ---------------------------------------------------------
-# 🛡️ ระบบดักจับเวอร์ชัน Web3 เพื่อแปลภาษา Binance Smart Chain (แก้ Error อ่านข้อมูลไม่ออก)
-# ---------------------------------------------------------
-try:
-    # สำหรับ Web3 เวอร์ชันใหม่ (v7+)
-    from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
-except ImportError:
-    try:
-        # สำหรับ Web3 เวอร์ชันเก่า (v6 ลงไป)
-        from web3.middleware import geth_poa_middleware
-    except ImportError:
-        geth_poa_middleware = None
+# กลับมาใช้ตัวแปลภาษาได้ตามปกติแล้ว เพราะเราล็อคเวอร์ชันไว้
+from web3.middleware import geth_poa_middleware 
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# คัดเฉพาะ RPC ที่ไม่บล็อกเซิร์ฟเวอร์คลาวด์ 100%
 RPC_LIST = [
-    "https://bsc.publicnode.com",
     "https://bsc-dataseed1.defibit.io",
     "https://bsc-dataseed1.ninicoin.io",
+    "https://bsc.publicnode.com",
+    "https://rpc.ankr.com/bsc",
     "https://bsc-dataseed.binance.org/"
 ]
 current_rpc_index = 0
@@ -36,12 +25,12 @@ ABI = '[{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256",
 
 def get_contract(rpc_url):
     w3 = Web3(Web3.HTTPProvider(rpc_url))
-    # ฉีดตัวแปลภาษาเข้าไปให้บอทอ่าน BSC รู้เรื่อง
-    if geth_poa_middleware:
-        w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+    # ฉีดตัวแปลภาษาเข้าไป
+    w3.middleware_onion.inject(geth_poa_middleware, layer=0)
     contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDRESS), abi=ABI)
     return w3, contract
 
+# เริ่มต้นเชื่อมต่อเซิร์ฟเวอร์แรก
 w3, contract = get_contract(RPC_LIST[current_rpc_index])
 
 NOTIFY_BEFORE_SECONDS = 30
@@ -96,7 +85,7 @@ def send_telegram_message(text):
 def main():
     global current_rpc_index, w3, contract
     
-    startup_msg = "✅ บอท Web3 (สมบูรณ์แบบ 100%) อัปเดตตัวแปลภาษาบล็อกเชนเรียบร้อย เริ่มทำงานแล้ว! 🚀"
+    startup_msg = "✅ บอท Web3 (ล็อคเวอร์ชันสำเร็จ) เริ่มทำงานแล้ว!\nระบบอ่านข้อมูลบล็อกเชนได้ 100% 🚀"
     send_telegram_message(startup_msg)
     print(f"Bot started. Connected to {RPC_LIST[current_rpc_index]}")
     
@@ -143,12 +132,12 @@ def main():
                     continue
                     
         except Exception as e:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] RPC Error, switching... ({e})")
             current_rpc_index = (current_rpc_index + 1) % len(RPC_LIST)
-            print(f"🔄 กำลังสลับเซิร์ฟเวอร์บล็อกเชนไปที่: {RPC_LIST[current_rpc_index]}")
             
             try:
                 w3, contract = get_contract(RPC_LIST[current_rpc_index])
+                print(f"🔄 สลับเซิร์ฟเวอร์บล็อกเชนไปที่: {RPC_LIST[current_rpc_index]}")
             except:
                 pass
             
