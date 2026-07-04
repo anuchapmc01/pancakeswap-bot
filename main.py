@@ -10,18 +10,15 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 # ---------------------------------------------------------
-# 🔗 เปลี่ยน RPC เป็นของ Ankr (อนุญาตให้บอทคลาวด์ดึงข้อมูลได้ ไม่โดนบล็อก IP)
+# 🔗 เปลี่ยน RPC เป็นเซิร์ฟเวอร์ที่เสถียรที่สุดสำหรับบอทคลาวด์
 # ---------------------------------------------------------
-BSC_RPC = "https://rpc.ankr.com/bsc"
+BSC_RPC = "https://bsc.publicnode.com"
 w3 = Web3(Web3.HTTPProvider(BSC_RPC))
 
-# ที่อยู่ Contract ของ PancakeSwap Prediction V2 (BNB)
 CONTRACT_ADDRESS = w3.to_checksum_address("0x18B2A6826674A0A57CB7fA9Fdeb9E955353cE530")
-
 ABI = '[{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"epochs","outputs":[{"internalType":"uint256","name":"epoch"},{"internalType":"uint256","name":"startTimestamp"},{"internalType":"uint256","name":"lockTimestamp"},{"internalType":"uint256","name":"closeTimestamp"},{"internalType":"int256","name":"lockPrice"},{"internalType":"int256","name":"closePrice"},{"internalType":"uint256","name":"lockOracleId"},{"internalType":"uint256","name":"closeOracleId"},{"internalType":"uint256","name":"totalAmount"},{"internalType":"uint256","name":"bullAmount"},{"internalType":"uint256","name":"bearAmount"},{"internalType":"uint256","name":"rewardBaseCalAmount"},{"internalType":"uint256","name":"rewardAmount"},{"internalType":"bool","name":"oracleCalled"}],"stateMutability":"view","type":"function"}]'
 contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
 
-# ตั้งค่าให้เตือนล่วงหน้าก่อนเวลา Lock จริงบนบล็อกเชน 30 วินาที
 NOTIFY_BEFORE_SECONDS = 30
 
 def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
@@ -72,29 +69,33 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap อัปเกรด (Web3 - Ankr) เริ่มทำงานแล้ว!\nจับเวลาแม่นยำ 100% จากบล็อกเชน 🚀"
+    startup_msg = "✅ บอท PancakeSwap อัปเกรดแก้บัคเงียบ (Web3) เริ่มทำงานแล้ว!\nระบบกำลังเชื่อมต่อบล็อกเชน... 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started with Web3 tracking (Ankr RPC).")
+    print("Bot started with robust Web3 tracking.")
     
     last_signaled_epoch = 0
     
     while True:
         try:
+            # 1. เช็ครอบปัจจุบัน
             current_epoch = contract.functions.currentEpoch().call()
             
             if current_epoch != last_signaled_epoch:
+                # 2. ดึงเวลาล็อคของรอบนี้
                 epoch_data = contract.functions.epochs(current_epoch).call()
                 lock_timestamp = epoch_data[2]
                 
+                # 3. คำนวณเวลาที่เหลือ
                 current_time = int(time.time())
                 time_remaining = lock_timestamp - current_time
                 
+                # 4. ถ้าเวลาเหลือ 30 วินาที หรือน้อยกว่า ให้ลั่นไก
                 if 0 < time_remaining <= NOTIFY_BEFORE_SECONDS:
                     df = get_binance_data()
                     
                     if not df.empty:
                         signal, price, rsi = analyze_trend(df)
-                        action_time = max(1, time_remaining - 10) 
+                        action_time = max(1, time_remaining - 10)
                         
                         if signal != "WAIT":
                             msg = (
@@ -112,16 +113,25 @@ def main():
                                 f"📊 RSI (1m): {rsi:.2f}"
                             )
                         send_telegram_message(msg)
-                        print(f"Sent Signal for Epoch #{current_epoch}")
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] Sent Signal for Epoch #{current_epoch}")
+                    else:
+                        # ถ้าดึงกราฟไม่ได้ ให้ฟ้องผ่าน Telegram ด้วย
+                        error_msg = f"⚠️ ดึงกราฟ Binance ไม่สำเร็จในรอบ #{current_epoch} ระบบขอข้ามไปก่อน"
+                        send_telegram_message(error_msg)
+                        print(error_msg)
                     
+                    # ล็อครอบไว้ จะได้ไม่ส่งซ้ำ
                     last_signaled_epoch = current_epoch
+                    
+                    # พัก 1 นาทีเพื่อรอรอบใหม่
                     time.sleep(60)
                     continue
                     
         except Exception as e:
-            # ถ้ายังมี Error โผล่มาบ้างเป็นบางครั้ง (เช่น เน็ตกระตุก) ให้ข้ามไป ไม่ต้องปริ้นท์รบกวนหน้าจอ
-            pass
+            # เอาคำสั่ง pass ออก เปลี่ยนเป็นปริ้นท์ Error ให้เห็นใน Log
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Web3 Error: ไม่สามารถเชื่อมต่อบล็อกเชนได้ ({e})")
             
+        # เช็คข้อมูลทุกๆ 2 วินาที
         time.sleep(2)
 
 if __name__ == "__main__":
