@@ -56,14 +56,14 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอทปรับเวลาเตือนช้าขึ้น 40 วิ เริ่มทำงานแล้ว! 🚀"
+    startup_msg = "✅ บอทปรับเวลาเตือนช้าขึ้นอีก 30 วิ (รวม 40 วิจากจุดเดิม) เริ่มทำงานแล้ว! 🚀"
     send_telegram_message(startup_msg)
     
     while True:
         now = datetime.now()
         
-        # ปรับจังหวะใหม่: เลื่อนไปเตือนที่ วินาทีที่ 10 ของนาทีที่ 5 หรือ 0 (ถัดจากนาทีเดิม 1 นาที)
-        if now.minute % 5 == 0 and now.second == 10: 
+        # ปรับมาเตือนที่วินาทีที่ 40 ของนาทีที่ 5 หรือ 0
+        if now.minute % 5 == 0 and now.second == 40: 
             try:
                 df = get_binance_data()
                 
@@ -91,7 +91,7 @@ def main():
                     )
                     send_telegram_message(msg)
                     
-                # ระบบเว้นช่วง 70 วินาที เพื่อให้พ้นช่วงรอยต่อของเว็บ
+                # เว้นช่วง 70 วินาที เพื่อป้องกันการทำงานทับซ้อนรอยต่อเว็บ
                 time.sleep(70) 
                 
             except Exception as e:
