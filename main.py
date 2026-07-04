@@ -6,7 +6,54 @@ from datetime import datetime
 import os
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+
+# PancakeSwap Prediction Contract (BSC)
+PREDICTION_CONTRACT = "0x18B2A687610328590Bc8F2e5fEdDe3b582A49cdA"
+BSC_RPC = "https://bsc-dataseed.binance.org/"
+
+def get_round_end_timestamp():
+    """ดึง lockTimestamp ของรอบปัจจุบันจาก contract โดยตรง"""
+    try:
+        # เรียก currentEpoch()
+        payload_epoch = {
+            "jsonrpc": "2.0", "method": "eth_call",
+            "params": [{
+                "to": PREDICTION_CONTRACT,
+                # currentEpoch() selector = 0x96bc7bfe
+                "data": "0x96bc7bfe"
+            }, "latest"],
+            "id": 1
+        }
+        r = requests.post(BSC_RPC, json=payload_epoch, timeout=5)
+        epoch_hex = r.json()["result"]
+        current_epoch = int(epoch_hex, 16)
+
+        # เรียก rounds(epoch) → struct มี lockTimestamp ที่ index 2
+        # rounds(uint256) selector = 0x4f48024d
+        epoch_padded = hex(current_epoch)[2:].zfill(64)
+        payload_round = {
+            "jsonrpc": "2.0", "method": "eth_call",
+            "params": [{
+                "to": PREDICTION_CONTRACT,
+                "data": "0x4f48024d" + epoch_padded
+            }, "latest"],
+            "id": 2
+        }
+        r2 = requests.post(BSC_RPC, json=payload_round, timeout=5)
+        result = r2.json()["result"]
+
+        # struct Round: epoch(0), startTimestamp(1), lockTimestamp(2), closeTimestamp(3)...
+        # แต่ละ slot = 32 bytes = 64 hex chars
+        # lockTimestamp อยู่ที่ slot index 2 (bytes 128-192)
+        lock_ts  = int(result[2 + 64*2 : 2 + 64*3], 16)
+        close_ts = int(result[2 + 64*3 : 2 + 64*4], 16)
+
+        return lock_ts, close_ts, current_epoch
+
+    except Exception as e:
+        print(f"[ERROR] get_round_end_timestamp: {e}")
+        return None, None, None
 
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
@@ -27,7 +74,7 @@ def get_binance_data(interval="1m", limit=100):
         df['vol_ma20']    = df['v'].rolling(window=20).mean()
         return df
     except Exception as e:
-        print(f"[ERROR] get_binance_data({interval}): {e}")
+        print(f"[ERROR] get_binance_data: {e}")
         return pd.DataFrame()
 
 def get_signal(df_1m, df_3m):
@@ -80,48 +127,30 @@ def send_telegram_message(text):
         print(f"[ERROR] Telegram: {e}")
 
 def main():
-    send_telegram_message(
-        "✅ Bot v7 เริ่มงานแล้ว!\n"
-        "⏰ ส่งสัญญาณ 30 วินาทีก่อนปิดรอบ PancakeSwap 🚀"
-    )
+    send_telegram_message("✅ Bot v8 (Real Contract Time) เริ่มงานแล้ว! 🚀")
 
-    sent_this_round = False
-    last_round_id = -1  # ใช้ track ว่าเข้ารอบใหม่แล้วหรือยัง
+    last_alerted_epoch = -1
 
     while True:
         now = datetime.now()
-        total_seconds = now.minute * 60 + now.second
+        now_ts = int(now.timestamp())
 
-        # round_id เปลี่ยนทุก 5 นาที → ใช้ track รอบ
-        round_id = total_seconds // 300  # 300 วินาที = 5 นาที
-        sec_in_round = total_seconds % 300  # วินาทีที่เดินไปในรอบนี้ (0-299)
+        lock_ts, close_ts, epoch = get_round_end_timestamp()
 
-        # reset เมื่อขึ้นรอบใหม่
-        if round_id != last_round_id:
-            sent_this_round = False
-            last_round_id = round_id
-            next_signal_at = sec_in_round  # แสดง log
-            print(f"[NEW ROUND] round_id={round_id} | sec_in_round={sec_in_round}")
+        if lock_ts and close_ts and epoch:
+            secs_to_lock = lock_ts - now_ts
+            print(f"[LOOP] {now.strftime('%H:%M:%S')} | epoch={epoch} | lock ใน {secs_to_lock}s")
 
-        # ✅ ส่งตอนวินาทีที่ 270-280 ของรอบ = 30 วินาทก่อนปิด (300-30=270)
-        is_signal_window = (270 <= sec_in_round <= 280)
-
-        # log ทุก 30 วิ
-        if sec_in_round % 30 == 0:
-            remaining = 300 - sec_in_round
-            print(f"[WAIT] {now.strftime('%H:%M:%S')} | sec_in_round={sec_in_round} | เหลือ {remaining}s | sent={sent_this_round}")
-
-        if is_signal_window and not sent_this_round:
-            print(f"[SIGNAL!] {now.strftime('%H:%M:%S')} sec_in_round={sec_in_round}")
-            try:
-                df1 = get_binance_data("1m", limit=100)
-                df3 = get_binance_data("3m", limit=100)
+            # ✅ ส่งเมื่อเหลือ 25-40 วินาทีก่อน lock (กันพลาด)
+            if 25 <= secs_to_lock <= 40 and epoch != last_alerted_epoch:
+                print(f"[SIGNAL!] เหลือ {secs_to_lock}s ก่อน lock")
+                df1 = get_binance_data("1m")
+                df3 = get_binance_data("3m")
 
                 if not df1.empty and not df3.empty:
                     signal, price, reason = get_signal(df1, df3)
+                    lock_time_str = datetime.fromtimestamp(lock_ts).strftime('%H:%M:%S')
 
-                    # คำนวณเวลาที่รอบปิด
-                    secs_left = 300 - sec_in_round
                     msg = (
                         f"🔮 PancakeSwap Prediction\n"
                         f"━━━━━━━━━━━━━━━\n"
@@ -129,21 +158,20 @@ def main():
                         f"💰 ราคา: ${price:.4f}\n"
                         f"📊 {reason}\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"⚡ แทงได้อีก ~{secs_left} วินาที!\n"
-                        f"⏳ เวลา: {now.strftime('%H:%M:%S')}"
+                        f"⚡ Lock ปิดตอน: {lock_time_str}\n"
+                        f"⏳ เหลือ: ~{secs_to_lock} วินาที!\n"
+                        f"🎯 Epoch: #{epoch+1}"
                     )
                     send_telegram_message(msg)
+                    last_alerted_epoch = epoch
                 else:
-                    send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ [{now.strftime('%H:%M:%S')}]")
+                    send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ | epoch #{epoch}")
+                    last_alerted_epoch = epoch
 
-                sent_this_round = True
+        else:
+            print(f"[WARN] {now.strftime('%H:%M:%S')} | ดึง contract ไม่ได้")
 
-            except Exception as e:
-                print(f"[ERROR] {e}")
-                send_telegram_message(f"❌ Error: {e}")
-                sent_this_round = True
-
-        time.sleep(1)
+        time.sleep(3)
 
 if __name__ == "__main__":
     main()
