@@ -8,76 +8,105 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ใช้ API ตรงจาก PancakeSwap เพื่อเลี่ยง Error บล็อกเชน
-def get_pancake_data():
+def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
-        # API ดึงสถานะ Prediction ล่าสุด
-        res = requests.get("https://prediction.pancakeswap.finance/api/v1/round/BNBUSDT/latest").json()
-        if res and 'round' in res:
-            return res['round']
-    except:
-        return None
-    return None
-
-def get_binance_data():
-    url = "https://api.binance.com/api/v3/klines?symbol=BNBUSDT&interval=1m&limit=50"
-    try:
-        data = requests.get(url).json()
-        df = pd.DataFrame(data, columns=['ts', 'o', 'h', 'l', 'close', 'v', 'ct', 'q', 't', 'tb', 'tq', 'i'])
+        response = requests.get(url).json()
+        
+        if isinstance(response, dict) and 'code' in response:
+            print(f"Binance API Error: {response}")
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(response, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
         df['close'] = pd.to_numeric(df['close'])
         return df
-    except:
+    except Exception as e:
+        print(f"Fetch Error: {e}")
         return pd.DataFrame()
 
 def analyze_trend(df):
     df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+    df['ema_9'] = ta.trend.EMAIndicator(df['close'], window=9).ema_indicator()
+    df['ema_21'] = ta.trend.EMAIndicator(df['close'], window=21).ema_indicator()
     df['ema_50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
     
-    latest = df.iloc[-1]
-    
-    # กลยุทธ์แบบเรียบง่ายแต่แม่นยำ
-    if latest['close'] > latest['ema_50'] and latest['rsi'] < 60:
-        return "UP 🟢", latest['close'], latest['rsi']
-    elif latest['close'] < latest['ema_50'] and latest['rsi'] > 40:
-        return "DOWN 🔴", latest['close'], latest['rsi']
-    return "WAIT", latest['close'], latest['rsi']
+    macd = ta.trend.MACD(df['close'])
+    df['macd_line'] = macd.macd()
+    df['macd_signal'] = macd.macd_signal()
 
-def send_telegram(msg):
+    latest = df.iloc[-1]
+    signal = "WAIT"
+    
+    if (latest['close'] > latest['ema_50'] and 
+        latest['ema_9'] > latest['ema_21'] and 
+        latest['macd_line'] > latest['macd_signal'] and 
+        45 <= latest['rsi'] <= 65):
+        signal = "UP 🟢"
+        
+    elif (latest['close'] < latest['ema_50'] and 
+          latest['ema_9'] < latest['ema_21'] and 
+          latest['macd_line'] < latest['macd_signal'] and 
+          35 <= latest['rsi'] <= 55):
+        signal = "DOWN 🔴"
+        
+    return signal, latest['close'], latest['rsi']
+
+def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    requests.post(url, data={'chat_id': TELEGRAM_CHAT_ID, 'text': msg})
+    payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text}
+    res = requests.post(url, data=payload).json()
+    if not res.get("ok"):
+        print(f"Telegram Error: {res}")
 
 def main():
-    send_telegram("✅ บอทโหมดเสถียร (Direct API) เริ่มทำงานแล้ว!")
-    last_epoch = 0
+    startup_msg = "✅ บอท PancakeSwap (แจ้งเตือนทุกรอบ) เริ่มทำงานแล้ว!\nระบบกำลังสแตนด์บายรอจับสัญญาณครับ 🚀"
+    send_telegram_message(startup_msg)
+    print("Bot started. Startup message sent.")
     
     while True:
-        try:
-            round_data = get_pancake_data()
-            if round_data:
-                current_epoch = round_data['epoch']
+        now = datetime.now()
+        if now.minute % 5 == 4 and now.second == 30:
+            try:
+                df = get_binance_data()
                 
-                # ถ้าเป็นรอบใหม่
-                if current_epoch != last_epoch:
-                    # รอให้ใกล้จบ (บอทจะคำนวณที่วินาทีที่ 20 ก่อนจบ)
-                    # หมายเหตุ: API นี้บอกเวลาจบให้เราแล้ว
-                    print(f"กำลังสแตนด์บายรอบ #{current_epoch}")
-                    last_epoch = current_epoch
+                if df.empty:
+                    print(f"[{now.strftime('%H:%M:%S')}] ไม่สามารถดึงกราฟได้ ข้ามรอบนี้ไปก่อน")
+                    time.sleep(60)
+                    continue
+                    
+                signal, price, rsi = analyze_trend(df)
                 
-                # เช็คการเตือนล่วงหน้า (ถ้าต้องการเตือนให้ปรับตาม logic ของ round_data)
-                # รอบนี้เราเน้นให้บอท "รันได้จริง" ก่อนครับ
-            
-            # บอทจะวนลูปเช็คสภาวะตลาดทุก 10 วินาที
-            df = get_binance_data()
-            signal, price, rsi = analyze_trend(df)
-            
-            # เตือนแค่ถ้ามีสัญญาณแรงๆ
-            if signal != "WAIT":
-                send_telegram(f"⚡️ สัญญาณตลาด: {signal}\n💰 ราคา: ${price:.2f}\n📊 RSI: {rsi:.1f}")
-                time.sleep(300) # พัก 5 นาที
-            
-        except:
-            pass
-        time.sleep(10)
+                if signal != "WAIT":
+                    msg = (
+                        f"🔮 PancakeSwap 5m Prediction\n"
+                        f"📍 สัญญาณ: {signal}\n"
+                        f"💰 ราคา BNB: ${price:.2f}\n"
+                        f"📊 RSI (1m): {rsi:.2f}\n"
+                        f"⏳ รีบลงเดิมพันภายใน 20 วินาที!"
+                    )
+                    send_telegram_message(msg)
+                    print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
+                else:
+                    # เพิ่มส่วนนี้เข้าไป เพื่อแจ้งเตือนตอน Skip
+                    msg = (
+                        f"⏸ PancakeSwap 5m Prediction\n"
+                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
+                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
+                        f"📊 RSI (1m): {rsi:.2f}"
+                    )
+                    send_telegram_message(msg)
+                    print(f"[{now.strftime('%H:%M:%S')}] แจ้งเตือนข้ามรอบนี้ (Skipped).")
+                    
+                time.sleep(60)
+            except Exception as e:
+                print(f"Error: {e}")
+                time.sleep(5)
+        else:
+            time.sleep(1)
 
 if __name__ == "__main__":
     main()
