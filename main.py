@@ -17,7 +17,6 @@ def get_binance_data(interval="1m", limit=100):
         ])
         for col in ['close','h','l','o','v']:
             df[col] = pd.to_numeric(df[col])
-
         df['ema_50']      = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
         df['rsi']         = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
         macd              = ta.trend.MACD(df['close'])
@@ -34,16 +33,13 @@ def get_binance_data(interval="1m", limit=100):
 def get_signal(df_1m, df_3m):
     l1 = df_1m.iloc[-1]
     l3 = df_3m.iloc[-1]
-
     required = ['close','ema_50','rsi','macd','macd_signal','stoch','vol_ma20']
     if any(pd.isna(l1[c]) for c in required) or pd.isna(l3['ema_50']):
         return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ (NaN)"
-
     price  = l1['close']
     vol_ok = l1['v'] > l1['vol_ma20'] * 0.6
     trend_up   = l1['close'] > l1['ema_50'] and l3['close'] > l3['ema_50']
     trend_down = l1['close'] < l1['ema_50'] and l3['close'] < l3['ema_50']
-
     if (trend_up and 38 < l1['rsi'] < 75 and
         l1['macd'] > l1['macd_signal'] and l1['stoch'] < 85 and vol_ok):
         reason = "\n".join([
@@ -54,7 +50,6 @@ def get_signal(df_1m, df_3m):
             f"✅ Vol: {l1['v']:.1f} > 60%MA ({l1['vol_ma20']*0.6:.1f})"
         ])
         return "UP 🟢", price, reason
-
     elif (trend_down and 25 < l1['rsi'] < 60 and
           l1['macd'] < l1['macd_signal'] and l1['stoch'] > 15 and vol_ok):
         reason = "\n".join([
@@ -65,10 +60,9 @@ def get_signal(df_1m, df_3m):
             f"✅ Vol: {l1['v']:.1f} > 60%MA ({l1['vol_ma20']*0.6:.1f})"
         ])
         return "DOWN 🔴", price, reason
-
     miss = []
     if not vol_ok:
-        miss.append(f"Volume ต ({l1['v']:.1f} < 60%MA {l1['vol_ma20']*0.6:.1f})")
+        miss.append(f"Volume ต่ำ ({l1['v']:.1f} < 60%MA {l1['vol_ma20']*0.6:.1f})")
     if not trend_up and not trend_down:
         miss.append("Trend 1m/3m ขัดแย้ง")
     miss.append(f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}")
@@ -87,26 +81,38 @@ def send_telegram_message(text):
 
 def main():
     send_telegram_message(
-        "✅ Bot v6 เริ่มงานแล้ว!\n"
+        "✅ Bot v7 เริ่มงานแล้ว!\n"
         "⏰ ส่งสัญญาณ 30 วินาทีก่อนปิดรอบ PancakeSwap 🚀"
     )
+
     sent_this_round = False
+    last_round_id = -1  # ใช้ track ว่าเข้ารอบใหม่แล้วหรือยัง
 
     while True:
         now = datetime.now()
-        minute_in_round = now.minute % 5  # 0,1,2,3,4
-        sec = now.second
+        total_seconds = now.minute * 60 + now.second
 
-        # ✅ ส่งตอนนาทีที่ 4 วินาที 28-32
-        # = 30 วินาทีก่อนรอบปิด (นาทีที่ 5 วินาทีที่ 0 รอบ reset)
-        is_signal_window = (minute_in_round == 4 and 28 <= sec <= 32)
+        # round_id เปลี่ยนทุก 5 นาที → ใช้ track รอบ
+        round_id = total_seconds // 300  # 300 วินาที = 5 นาที
+        sec_in_round = total_seconds % 300  # วินาทีที่เดินไปในรอบนี้ (0-299)
 
-        # reset flag เมื่อขึ้นรอบใหม่
-        if minute_in_round == 0 and sec < 10:
+        # reset เมื่อขึ้นรอบใหม่
+        if round_id != last_round_id:
             sent_this_round = False
+            last_round_id = round_id
+            next_signal_at = sec_in_round  # แสดง log
+            print(f"[NEW ROUND] round_id={round_id} | sec_in_round={sec_in_round}")
+
+        # ✅ ส่งตอนวินาทีที่ 270-280 ของรอบ = 30 วินาทก่อนปิด (300-30=270)
+        is_signal_window = (270 <= sec_in_round <= 280)
+
+        # log ทุก 30 วิ
+        if sec_in_round % 30 == 0:
+            remaining = 300 - sec_in_round
+            print(f"[WAIT] {now.strftime('%H:%M:%S')} | sec_in_round={sec_in_round} | เหลือ {remaining}s | sent={sent_this_round}")
 
         if is_signal_window and not sent_this_round:
-            print(f"[SIGNAL WINDOW] {now.strftime('%H:%M:%S')} — กำลังวิเคราะห์...")
+            print(f"[SIGNAL!] {now.strftime('%H:%M:%S')} sec_in_round={sec_in_round}")
             try:
                 df1 = get_binance_data("1m", limit=100)
                 df3 = get_binance_data("3m", limit=100)
@@ -114,10 +120,8 @@ def main():
                 if not df1.empty and not df3.empty:
                     signal, price, reason = get_signal(df1, df3)
 
-                    # คำนวณรอบถัดไปที่จะเริ่ม
-                    next_round_min = (now.minute // 5 + 1) * 5
-                    next_round_str = f"{now.hour:02d}:{next_round_min % 60:02d}:00"
-
+                    # คำนวณเวลาที่รอบปิด
+                    secs_left = 300 - sec_in_round
                     msg = (
                         f"🔮 PancakeSwap Prediction\n"
                         f"━━━━━━━━━━━━━━━\n"
@@ -125,24 +129,19 @@ def main():
                         f"💰 ราคา: ${price:.4f}\n"
                         f"📊 {reason}\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"⚡ แทงรอบ: {next_round_str}\n"
-                        f"⏳ เหลือเวลา: ~30 วินาที!"
+                        f"⚡ แทงได้อีก ~{secs_left} วินาที!\n"
+                        f"⏳ เวลา: {now.strftime('%H:%M:%S')}"
                     )
                     send_telegram_message(msg)
-                    sent_this_round = True
                 else:
                     send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ [{now.strftime('%H:%M:%S')}]")
-                    sent_this_round = True
+
+                sent_this_round = True
 
             except Exception as e:
                 print(f"[ERROR] {e}")
                 send_telegram_message(f"❌ Error: {e}")
                 sent_this_round = True
-
-        else:
-            # log ทุก 10 วิ ให้รู้ว่า loop ยังทำงาน
-            if sec % 10 == 0:
-                print(f"[WAIT] {now.strftime('%H:%M:%S')} | round_min={minute_in_round} | sent={sent_this_round}")
 
         time.sleep(1)
 
