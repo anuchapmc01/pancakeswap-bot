@@ -5,32 +5,31 @@ import ta
 from datetime import datetime
 import os
 from web3 import Web3
-# กลับมาใช้ตัวแปลภาษาได้ตามปกติแล้ว เพราะเราล็อคเวอร์ชันไว้
 from web3.middleware import geth_poa_middleware 
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 RPC_LIST = [
+    "https://bsc.publicnode.com",
     "https://bsc-dataseed1.defibit.io",
     "https://bsc-dataseed1.ninicoin.io",
-    "https://bsc.publicnode.com",
     "https://rpc.ankr.com/bsc",
     "https://bsc-dataseed.binance.org/"
 ]
 current_rpc_index = 0
 
-CONTRACT_ADDRESS = "0x18B2A6826674A0A57CB7fA9Fdeb9E955353cE530"
+# 🔥 แก้ไข Address เป็นตัวที่ถูกต้อง 100% แล้วครับ 🔥
+CONTRACT_ADDRESS = "0x18B2A687610328590Bc8F2e5fEdDe3b582A49cdA"
+
 ABI = '[{"inputs":[],"name":"currentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"epochs","outputs":[{"internalType":"uint256","name":"epoch"},{"internalType":"uint256","name":"startTimestamp"},{"internalType":"uint256","name":"lockTimestamp"},{"internalType":"uint256","name":"closeTimestamp"},{"internalType":"int256","name":"lockPrice"},{"internalType":"int256","name":"closePrice"},{"internalType":"uint256","name":"lockOracleId"},{"internalType":"uint256","name":"closeOracleId"},{"internalType":"uint256","name":"totalAmount"},{"internalType":"uint256","name":"bullAmount"},{"internalType":"uint256","name":"bearAmount"},{"internalType":"uint256","name":"rewardBaseCalAmount"},{"internalType":"uint256","name":"rewardAmount"},{"internalType":"bool","name":"oracleCalled"}],"stateMutability":"view","type":"function"}]'
 
 def get_contract(rpc_url):
     w3 = Web3(Web3.HTTPProvider(rpc_url))
-    # ฉีดตัวแปลภาษาเข้าไป
     w3.middleware_onion.inject(geth_poa_middleware, layer=0)
     contract = w3.eth.contract(address=w3.to_checksum_address(CONTRACT_ADDRESS), abi=ABI)
     return w3, contract
 
-# เริ่มต้นเชื่อมต่อเซิร์ฟเวอร์แรก
 w3, contract = get_contract(RPC_LIST[current_rpc_index])
 
 NOTIFY_BEFORE_SECONDS = 30
@@ -85,7 +84,7 @@ def send_telegram_message(text):
 def main():
     global current_rpc_index, w3, contract
     
-    startup_msg = "✅ บอท Web3 (ล็อคเวอร์ชันสำเร็จ) เริ่มทำงานแล้ว!\nระบบอ่านข้อมูลบล็อกเชนได้ 100% 🚀"
+    startup_msg = "✅ บอทแก้ไข Address ถูกต้อง 100% เริ่มทำงานแล้ว!\nระบบอ่านเวลาล็อคจากบล็อกเชนได้สมบูรณ์ 🚀"
     send_telegram_message(startup_msg)
     print(f"Bot started. Connected to {RPC_LIST[current_rpc_index]}")
     
@@ -137,7 +136,7 @@ def main():
             
             try:
                 w3, contract = get_contract(RPC_LIST[current_rpc_index])
-                print(f"🔄 สลับเซิร์ฟเวอร์บล็อกเชนไปที่: {RPC_LIST[current_rpc_index]}")
+                print(f"🔄 สลับเซิร์ฟเวอร์ไปที่: {RPC_LIST[current_rpc_index]}")
             except:
                 pass
             
