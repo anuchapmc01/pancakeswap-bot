@@ -8,6 +8,9 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
+# ปรับตัวนี้ถ้าเวลายังคลาดเคลื่อน (+/- วินาที)
+OFFSET_SECONDS = 0
+
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
     try:
@@ -17,12 +20,10 @@ def get_binance_data(interval="1m", limit=100):
         ])
         for col in ['close','h','l','o','v']:
             df[col] = pd.to_numeric(df[col])
-
-        # ใช้ EMA20 แทน EMA50 — เร็วกว่า เหมาะ 5 นาที
-        df['ema_20']      = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
-        df['rsi']         = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        stoch             = ta.momentum.StochasticOscillator(df['h'], df['l'], df['close'])
-        df['stoch']       = stoch.stoch()
+        df['ema_20'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
+        df['rsi']    = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+        stoch        = ta.momentum.StochasticOscillator(df['h'], df['l'], df['close'])
+        df['stoch']  = stoch.stoch()
         return df
     except Exception as e:
         print(f"[ERROR] Binance: {e}")
@@ -31,46 +32,32 @@ def get_binance_data(interval="1m", limit=100):
 def get_signal(df_1m, df_3m):
     l1 = df_1m.iloc[-1]
     l3 = df_3m.iloc[-1]
-
     required = ['close','ema_20','rsi','stoch']
     if any(pd.isna(l1[c]) for c in required) or pd.isna(l3['ema_20']):
-        return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ (NaN)"
-
+        return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ"
     price = l1['close']
-
-    # ราคาห่างจาก EMA20 กี่ % (ใช้แทน trend ที่แข็งแกร่ง)
     ema_diff_3m = (l3['close'] - l3['ema_20']) / l3['ema_20'] * 100
     ema_diff_1m = (l1['close'] - l1['ema_20']) / l1['ema_20'] * 100
-
     print(f"[DEBUG] RSI={l1['rsi']:.1f} Stoch={l1['stoch']:.1f} "
           f"EMA_diff_1m={ema_diff_1m:.3f}% EMA_diff_3m={ema_diff_3m:.3f}%")
-
-    # UP: ราคาเหนือ EMA20 (แม้นิดเดียว) + RSI ไม่ overbought
-    if (ema_diff_3m > -0.05 and          # 3m ไม่ตกว่า EMA มากเกิน
-        ema_diff_1m > -0.05 and          # 1m ไม่ต่ำกว่า EMA มากเกิน
-        35 < l1['rsi'] < 78 and
-        l1['stoch'] < 88):
+    if (ema_diff_3m > -0.05 and ema_diff_1m > -0.05 and
+        35 < l1['rsi'] < 78 and l1['stoch'] < 88):
         reason = "\n".join([
-            f"✅ ราคาใกล้/เหนือ EMA20",
+            "✅ ราคาใกล้/เหนือ EMA20",
             f"✅ RSI: {l1['rsi']:.1f}",
             f"✅ Stoch: {l1['stoch']:.1f}",
             f"📈 EMA diff: {ema_diff_1m:+.3f}%"
         ])
         return "UP 🟢", price, reason
-
-    # DOWN: ราคาตกว่า EMA20 + RSI ไม่ oversold
-    elif (ema_diff_3m < 0.05 and
-          ema_diff_1m < 0.05 and
-          22 < l1['rsi'] < 65 and
-          l1['stoch'] > 12):
+    elif (ema_diff_3m < 0.05 and ema_diff_1m < 0.05 and
+          22 < l1['rsi'] < 65 and l1['stoch'] > 12):
         reason = "\n".join([
-            f"✅ ราคาใกล้/ต่ำกว่า EMA20",
+            "✅ ราคาใกล้/ต่ำกว่า EMA20",
             f"✅ RSI: {l1['rsi']:.1f}",
             f"✅ Stoch: {l1['stoch']:.1f}",
             f"📉 EMA diff: {ema_diff_1m:+.3f}%"
         ])
         return "DOWN 🔴", price, reason
-
     miss = [
         f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}",
         f"EMA diff 1m: {ema_diff_1m:+.3f}% | 3m: {ema_diff_3m:+.3f}%"
@@ -88,23 +75,30 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"[ERROR] Telegram: {e}")
 
+def get_secs_left():
+    """คำนวณเวลาที่เหลือในรอบ sync กับนาฬิกา Unix จริง ไม่สะสม drift"""
+    unix_now = time.time() + OFFSET_SECONDS
+    sec_in_round = unix_now % 300   # วินาทีในรอบ 5 นาที (0.0 - 299.9)
+    secs_left = 300 - sec_in_round  # เหลืออีกกี่วินาที
+    round_id  = int(unix_now) // 300
+    return secs_left, round_id
+
 def main():
-    send_telegram_message("✅ Bot v11 (EMA20 + Fast Signal) เริ่มงานแล้ว! 🚀")
+    send_telegram_message("✅ Bot v12 (Unix Sync Timer) เริ่มงานแล้ว! 🚀")
 
     last_alerted_round = -1
 
     while True:
+        secs_left, round_id = get_secs_left()
         now = datetime.now()
-        now_ts       = now.minute * 60 + now.second
-        sec_in_round = now_ts % 300
-        round_id     = now_ts // 300
-        secs_left    = 300 - sec_in_round
 
-        if sec_in_round % 30 == 0:
-            print(f"[WAIT] {now.strftime('%H:%M:%S')} | sec_in_round={sec_in_round} | เหลือ {secs_left}s")
+        # log ทุก ~30 วิ
+        if 29.5 < (300 - secs_left) % 30 < 30.5:
+            print(f"[WAIT] {now.strftime('%H:%M:%S')} | เหลือ {secs_left:.1f}s | round={round_id}")
 
+        # ✅ ส่งตอนเหลือ 30-45 วินาที — sync กับ Unix time ตรงๆ
         if 30 <= secs_left <= 45 and round_id != last_alerted_round:
-            print(f"[SIGNAL!] {now.strftime('%H:%M:%S')} เหลือ {secs_left}s — วิเคราะห์...")
+            print(f"[SIGNAL!] {now.strftime('%H:%M:%S')} เหลือ {secs_left:.1f}s — วิเคราะห์...")
             try:
                 df1 = get_binance_data("1m")
                 df3 = get_binance_data("3m")
@@ -119,6 +113,8 @@ def main():
                     else:
                         action = "⏸ แนะนำ: ข้ามรอบนี้"
 
+                    # คำนวณเวลาที่เหลือหลังดึงข้อมูลเสร็จ
+                    secs_left_now, _ = get_secs_left()
                     msg = (
                         f"🔮 PancakeSwap Prediction\n"
                         f"━━━━━━━━━━━━━━━\n"
@@ -127,7 +123,7 @@ def main():
                         f"💰 ราคา: ${price:.4f}\n"
                         f"📊 {reason}\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"⏳ เหลือเวลาแทง: ~{secs_left}s\n"
+                        f"⏳ เหลือเวลาแทง: ~{secs_left_now:.0f}s\n"
                         f"🕐 เวลา: {now.strftime('%H:%M:%S')}"
                     )
                     send_telegram_message(msg)
@@ -141,7 +137,16 @@ def main():
                 send_telegram_message(f"❌ Error: {e}")
                 last_alerted_round = round_id
 
-        time.sleep(1)
+        # ✅ sleep แม่นยำ — คำนวณจากเวลาที่เหลือจริง ไม่ใช่ sleep(1) ตายตัว
+        secs_left_now, _ = get_secs_left()
+        if secs_left_now > 50:
+            # ห่างจาก window มาก — sleep ยาวขึ้น ประหยัด CPU
+            sleep_time = min(secs_left_now - 45, 10)
+        else:
+            # ใกล้ window — poll ถี่ขึ้น
+            sleep_time = 0.5
+
+        time.sleep(sleep_time)
 
 if __name__ == "__main__":
     main()
