@@ -39,54 +39,39 @@ def get_signal(df_1m, df_3m):
     if any(pd.isna(l1[c]) for c in required) or pd.isna(l3['ema_50']):
         return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ (NaN)"
 
-    price = l1['close']
-
-    # ✅ ผ่อน Volume — แค่ไม่ต่ำกว่า 60% ของ MA20
+    price  = l1['close']
     vol_ok = l1['v'] > l1['vol_ma20'] * 0.6
-
     trend_up   = l1['close'] > l1['ema_50'] and l3['close'] > l3['ema_50']
     trend_down = l1['close'] < l1['ema_50'] and l3['close'] < l3['ema_50']
 
-    # === UP ===
-    if (trend_up and
-        38 < l1['rsi'] < 75 and
-        l1['macd'] > l1['macd_signal'] and
-        l1['stoch'] < 85 and
-        vol_ok):
+    if (trend_up and 38 < l1['rsi'] < 75 and
+        l1['macd'] > l1['macd_signal'] and l1['stoch'] < 85 and vol_ok):
         reason = "\n".join([
             f"✅ Trend UP (1m & 3m)",
-            f"✅ RSI: {l1['rsi']:.1f} (38-75)",
+            f"✅ RSI: {l1['rsi']:.1f}",
             f"✅ MACD: Bullish",
-            f"✅ Stoch: {l1['stoch']:.1f} < 85",
-            f"✅ Vol: {l1['v']:.1f} > 60% MA ({l1['vol_ma20']*0.6:.1f})"
+            f"✅ Stoch: {l1['stoch']:.1f}",
+            f"✅ Vol: {l1['v']:.1f} > 60%MA ({l1['vol_ma20']*0.6:.1f})"
         ])
         return "UP 🟢", price, reason
 
-    # === DOWN ===
-    elif (trend_down and
-          25 < l1['rsi'] < 60 and
-          l1['macd'] < l1['macd_signal'] and
-          l1['stoch'] > 15 and
-          vol_ok):
+    elif (trend_down and 25 < l1['rsi'] < 60 and
+          l1['macd'] < l1['macd_signal'] and l1['stoch'] > 15 and vol_ok):
         reason = "\n".join([
             f"✅ Trend DOWN (1m & 3m)",
-            f"✅ RSI: {l1['rsi']:.1f} (25-60)",
+            f"✅ RSI: {l1['rsi']:.1f}",
             f"✅ MACD: Bearish",
-            f"✅ Stoch: {l1['stoch']:.1f} > 15",
-            f"✅ Vol: {l1['v']:.1f} > 60% MA ({l1['vol_ma20']*0.6:.1f})"
+            f"✅ Stoch: {l1['stoch']:.1f}",
+            f"✅ Vol: {l1['v']:.1f} > 60%MA ({l1['vol_ma20']*0.6:.1f})"
         ])
         return "DOWN 🔴", price, reason
 
-    # NEUTRAL — บอกเหตุผล
     miss = []
     if not vol_ok:
-        miss.append(f"Volume ต่ำ ({l1['v']:.1f} < 60%MA {l1['vol_ma20']*0.6:.1f})")
+        miss.append(f"Volume ต ({l1['v']:.1f} < 60%MA {l1['vol_ma20']*0.6:.1f})")
     if not trend_up and not trend_down:
-        miss.append("Trend 1m/3m ขัดแย้งกัน")
-    if l1['macd'] == l1['macd_signal']:
-        miss.append("MACD ไม่ชัด")
+        miss.append("Trend 1m/3m ขัดแย้ง")
     miss.append(f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}")
-
     return "NEUTRAL ⚪", price, "⏸ รอสัญญาณ:\n" + "\n".join(miss)
 
 def send_telegram_message(text):
@@ -101,35 +86,65 @@ def send_telegram_message(text):
         print(f"[ERROR] Telegram: {e}")
 
 def main():
-    send_telegram_message("✅ Bot v5 (Relaxed Volume + Wider Zone) เริ่มงานแล้ว! 🚀")
+    send_telegram_message(
+        "✅ Bot v6 เริ่มงานแล้ว!\n"
+        "⏰ ส่งสัญญาณ 30 วินาทีก่อนปิดรอบ PancakeSwap 🚀"
+    )
+    sent_this_round = False
 
     while True:
         now = datetime.now()
-        print(f"[LOOP] {now.strftime('%H:%M:%S')} — กำลังดึงข้อมูล...")
+        minute_in_round = now.minute % 5  # 0,1,2,3,4
+        sec = now.second
 
-        try:
-            df1 = get_binance_data("1m", limit=100)
-            df3 = get_binance_data("3m", limit=100)
+        # ✅ ส่งตอนนาทีที่ 4 วินาที 28-32
+        # = 30 วินาทีก่อนรอบปิด (นาทีที่ 5 วินาทีที่ 0 รอบ reset)
+        is_signal_window = (minute_in_round == 4 and 28 <= sec <= 32)
 
-            if not df1.empty and not df3.empty:
-                signal, price, reason = get_signal(df1, df3)
-                msg = (
-                    f"🔮 BNB/USDT — 5min Prediction\n"
-                    f"📍 สญญาณ: {signal}\n"
-                    f"💰 ราคา: ${price:.4f}\n"
-                    f"📊 {reason}\n"
-                    f"⏳ เวลา: {now.strftime('%H:%M:%S')}"
-                )
-                send_telegram_message(msg)
-            else:
-                send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ [{now.strftime('%H:%M:%S')}]")
+        # reset flag เมื่อขึ้นรอบใหม่
+        if minute_in_round == 0 and sec < 10:
+            sent_this_round = False
 
-        except Exception as e:
-            print(f"[ERROR] main: {e}")
-            send_telegram_message(f"❌ Error: {e}")
+        if is_signal_window and not sent_this_round:
+            print(f"[SIGNAL WINDOW] {now.strftime('%H:%M:%S')} — กำลังวิเคราะห์...")
+            try:
+                df1 = get_binance_data("1m", limit=100)
+                df3 = get_binance_data("3m", limit=100)
 
-        print("[LOOP] รอ 5 นาที...")
-        time.sleep(300)
+                if not df1.empty and not df3.empty:
+                    signal, price, reason = get_signal(df1, df3)
+
+                    # คำนวณรอบถัดไปที่จะเริ่ม
+                    next_round_min = (now.minute // 5 + 1) * 5
+                    next_round_str = f"{now.hour:02d}:{next_round_min % 60:02d}:00"
+
+                    msg = (
+                        f"🔮 PancakeSwap Prediction\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"📍 สัญญาณ: {signal}\n"
+                        f"💰 ราคา: ${price:.4f}\n"
+                        f"📊 {reason}\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"⚡ แทงรอบ: {next_round_str}\n"
+                        f"⏳ เหลือเวลา: ~30 วินาที!"
+                    )
+                    send_telegram_message(msg)
+                    sent_this_round = True
+                else:
+                    send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ [{now.strftime('%H:%M:%S')}]")
+                    sent_this_round = True
+
+            except Exception as e:
+                print(f"[ERROR] {e}")
+                send_telegram_message(f"❌ Error: {e}")
+                sent_this_round = True
+
+        else:
+            # log ทุก 10 วิ ให้รู้ว่า loop ยังทำงาน
+            if sec % 10 == 0:
+                print(f"[WAIT] {now.strftime('%H:%M:%S')} | round_min={minute_in_round} | sent={sent_this_round}")
+
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
