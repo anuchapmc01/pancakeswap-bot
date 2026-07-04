@@ -8,11 +8,18 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# ---------------------------------------------------------
+# ⚙️ ตั้งค่าเวลาแจ้งเตือน (ปรับตัวเลขตรงนี้ถ้าเวลาเว็บเคลื่อน)
+# ---------------------------------------------------------
+# ใส่เลข 0, 1, 2, 3 หรือ 4 (เช่น ถ้าเว็บล็อกตอนนาทีที่ 27 (27 หาร 5 เหลือเศษ 2) ให้เตือนก่อน 1 นาที คือเศษ 1)
+TRIGGER_MINUTE_REMAINDER = 1  
+TRIGGER_SECOND = 30           # วินาทีที่จะให้เตือน (แนะนำ 30)
+# ---------------------------------------------------------
+
 def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
         response = requests.get(url).json()
-        
         if isinstance(response, dict) and 'code' in response:
             print(f"Binance API Error: {response}")
             return pd.DataFrame()
@@ -63,18 +70,18 @@ def send_telegram_message(text):
         print(f"Telegram Error: {res}")
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap (แจ้งเตือนทุกรอบ) เริ่มทำงานแล้ว!\nระบบกำลังสแตนด์บายรอจับสัญญาณครับ 🚀"
+    startup_msg = f"✅ บอทปรับเวลาใหม่เริ่มทำงานแล้ว!\nตั้งค่าเตือนที่เศษนาทีที่: {TRIGGER_MINUTE_REMAINDER} วินาทีที่: {TRIGGER_SECOND} 🚀"
     send_telegram_message(startup_msg)
     print("Bot started. Startup message sent.")
     
     while True:
         now = datetime.now()
-        if now.minute % 5 == 4 and now.second == 30:
+        # ดึงค่าเวลามาจากตั้งค่าด้านบน
+        if now.minute % 5 == TRIGGER_MINUTE_REMAINDER and now.second == TRIGGER_SECOND:
             try:
                 df = get_binance_data()
                 
                 if df.empty:
-                    print(f"[{now.strftime('%H:%M:%S')}] ไม่สามารถดึงกราฟได้ ข้ามรอบนี้ไปก่อน")
                     time.sleep(60)
                     continue
                     
@@ -91,7 +98,6 @@ def main():
                     send_telegram_message(msg)
                     print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
                 else:
-                    # เพิ่มส่วนนี้เข้าไป เพื่อแจ้งเตือนตอน Skip
                     msg = (
                         f"⏸ PancakeSwap 5m Prediction\n"
                         f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
