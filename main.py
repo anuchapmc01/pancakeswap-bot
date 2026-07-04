@@ -38,7 +38,11 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    print("Bot started. Waiting for the exact timing to analyze...")
+    # ส่งข้อความทดสอบเข้า Telegram ทันทีที่รันบอท
+    startup_msg = "✅ บอท PancakeSwap 5m Prediction เริ่มทำงานแล้ว!\nระบบกำลังสแตนด์บายรอจับสัญญาณครับ 🚀"
+    send_telegram_message(startup_msg)
+    print("Bot started. Startup message sent to Telegram.")
+    
     while True:
         now = datetime.now()
         if now.minute % 5 == 4 and now.second == 30:
