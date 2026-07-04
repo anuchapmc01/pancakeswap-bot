@@ -8,51 +8,25 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
-# PancakeSwap Prediction Contract (BSC)
-PREDICTION_CONTRACT = "0x18B2A687610328590Bc8F2e5fEdDe3b582A49cdA"
-BSC_RPC = "https://bsc-dataseed.binance.org/"
+# PancakeSwap Prediction API (Graph)
+PANCAKE_API = "https://pancakeswap-prediction-v2.vercel.app/api/prediction/bnb"
 
-def get_round_end_timestamp():
-    """ดึง lockTimestamp ของรอบปัจจุบันจาก contract โดยตรง"""
+def get_pancake_round_info():
+    """ดึง lockTimestamp ของรอบปัจจุบันจาก PancakeSwap API"""
     try:
-        # เรียก currentEpoch()
-        payload_epoch = {
-            "jsonrpc": "2.0", "method": "eth_call",
-            "params": [{
-                "to": PREDICTION_CONTRACT,
-                # currentEpoch() selector = 0x96bc7bfe
-                "data": "0x96bc7bfe"
-            }, "latest"],
-            "id": 1
-        }
-        r = requests.post(BSC_RPC, json=payload_epoch, timeout=5)
-        epoch_hex = r.json()["result"]
-        current_epoch = int(epoch_hex, 16)
-
-        # เรียก rounds(epoch) → struct มี lockTimestamp ที่ index 2
-        # rounds(uint256) selector = 0x4f48024d
-        epoch_padded = hex(current_epoch)[2:].zfill(64)
-        payload_round = {
-            "jsonrpc": "2.0", "method": "eth_call",
-            "params": [{
-                "to": PREDICTION_CONTRACT,
-                "data": "0x4f48024d" + epoch_padded
-            }, "latest"],
-            "id": 2
-        }
-        r2 = requests.post(BSC_RPC, json=payload_round, timeout=5)
-        result = r2.json()["result"]
-
-        # struct Round: epoch(0), startTimestamp(1), lockTimestamp(2), closeTimestamp(3)...
-        # แต่ละ slot = 32 bytes = 64 hex chars
-        # lockTimestamp อยู่ที่ slot index 2 (bytes 128-192)
-        lock_ts  = int(result[2 + 64*2 : 2 + 64*3], 16)
-        close_ts = int(result[2 + 64*3 : 2 + 64*4], 16)
-
-        return lock_ts, close_ts, current_epoch
-
+        r = requests.get(PANCAKE_API, timeout=8)
+        data = r.json()
+        # หา round ที่ epoch สูงสุด (รอบปัจจุบัน)
+        rounds = data.get("rounds", [])
+        if not rounds:
+            return None, None, None
+        current = max(rounds, key=lambda x: x["epoch"])
+        epoch    = current["epoch"]
+        lock_ts  = current["lockTimestamp"]
+        close_ts = current["closeTimestamp"]
+        return lock_ts, close_ts, epoch
     except Exception as e:
-        print(f"[ERROR] get_round_end_timestamp: {e}")
+        print(f"[ERROR] PancakeSwap API: {e}")
         return None, None, None
 
 def get_binance_data(interval="1m", limit=100):
@@ -74,7 +48,7 @@ def get_binance_data(interval="1m", limit=100):
         df['vol_ma20']    = df['v'].rolling(window=20).mean()
         return df
     except Exception as e:
-        print(f"[ERROR] get_binance_data: {e}")
+        print(f"[ERROR] Binance: {e}")
         return pd.DataFrame()
 
 def get_signal(df_1m, df_3m):
@@ -90,9 +64,9 @@ def get_signal(df_1m, df_3m):
     if (trend_up and 38 < l1['rsi'] < 75 and
         l1['macd'] > l1['macd_signal'] and l1['stoch'] < 85 and vol_ok):
         reason = "\n".join([
-            f"✅ Trend UP (1m & 3m)",
+            "✅ Trend UP (1m & 3m)",
             f"✅ RSI: {l1['rsi']:.1f}",
-            f"✅ MACD: Bullish",
+            "✅ MACD: Bullish",
             f"✅ Stoch: {l1['stoch']:.1f}",
             f"✅ Vol: {l1['v']:.1f} > 60%MA ({l1['vol_ma20']*0.6:.1f})"
         ])
@@ -100,9 +74,9 @@ def get_signal(df_1m, df_3m):
     elif (trend_down and 25 < l1['rsi'] < 60 and
           l1['macd'] < l1['macd_signal'] and l1['stoch'] > 15 and vol_ok):
         reason = "\n".join([
-            f"✅ Trend DOWN (1m & 3m)",
+            "✅ Trend DOWN (1m & 3m)",
             f"✅ RSI: {l1['rsi']:.1f}",
-            f"✅ MACD: Bearish",
+            "✅ MACD: Bearish",
             f"✅ Stoch: {l1['stoch']:.1f}",
             f"✅ Vol: {l1['v']:.1f} > 60%MA ({l1['vol_ma20']*0.6:.1f})"
         ])
@@ -127,30 +101,28 @@ def send_telegram_message(text):
         print(f"[ERROR] Telegram: {e}")
 
 def main():
-    send_telegram_message("✅ Bot v8 (Real Contract Time) เริ่มงานแล้ว! 🚀")
+    send_telegram_message("✅ Bot v9 (PancakeSwap API Timer) เริ่มงานแล้ว! 🚀")
 
     last_alerted_epoch = -1
 
     while True:
-        now = datetime.now()
+        now    = datetime.now()
         now_ts = int(now.timestamp())
 
-        lock_ts, close_ts, epoch = get_round_end_timestamp()
+        lock_ts, close_ts, epoch = get_pancake_round_info()
 
-        if lock_ts and close_ts and epoch:
+        if lock_ts and epoch:
             secs_to_lock = lock_ts - now_ts
             print(f"[LOOP] {now.strftime('%H:%M:%S')} | epoch={epoch} | lock ใน {secs_to_lock}s")
 
-            # ✅ ส่งเมื่อเหลือ 25-40 วินาทีก่อน lock (กันพลาด)
-            if 25 <= secs_to_lock <= 40 and epoch != last_alerted_epoch:
-                print(f"[SIGNAL!] เหลือ {secs_to_lock}s ก่อน lock")
+            if 25 <= secs_to_lock <= 45 and epoch != last_alerted_epoch:
+                print(f"[SIGNAL!] {secs_to_lock}s ก่อน lock")
                 df1 = get_binance_data("1m")
                 df3 = get_binance_data("3m")
 
                 if not df1.empty and not df3.empty:
                     signal, price, reason = get_signal(df1, df3)
                     lock_time_str = datetime.fromtimestamp(lock_ts).strftime('%H:%M:%S')
-
                     msg = (
                         f"🔮 PancakeSwap Prediction\n"
                         f"━━━━━━━━━━━━━━━\n"
@@ -158,8 +130,8 @@ def main():
                         f"💰 ราคา: ${price:.4f}\n"
                         f"📊 {reason}\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"⚡ Lock ปิดตอน: {lock_time_str}\n"
-                        f"⏳ เหลือ: ~{secs_to_lock} วินาที!\n"
+                        f"⚡ Lock ปิด: {lock_time_str}\n"
+                        f"⏳ เหลือ: ~{secs_to_lock}s\n"
                         f"🎯 Epoch: #{epoch+1}"
                     )
                     send_telegram_message(msg)
@@ -167,9 +139,13 @@ def main():
                 else:
                     send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ | epoch #{epoch}")
                     last_alerted_epoch = epoch
-
         else:
-            print(f"[WARN] {now.strftime('%H:%M:%S')} | ดึง contract ไม่ได้")
+            # fallback: ถ้า API ล่ม ใช้เวลานาฬิกาแทน
+            print(f"[WARN] {now.strftime('%H:%M:%S')} | PancakeSwap API ไม่ตอบ — ใช้ fallback")
+            secs_in_round = (now.minute * 60 + now.second) % 300
+            secs_to_lock_fb = 270 - secs_in_round
+            if 25 <= secs_to_lock_fb <= 45:
+                send_telegram_message(f"⚠️ Fallback mode | เหลือ ~{secs_to_lock_fb}s (ประมาณ)")
 
         time.sleep(3)
 
