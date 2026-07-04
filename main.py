@@ -8,10 +8,8 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
-# 🛠 ปรับเวลาให้ตรงกับหน้าเว็บ PancakeSwap
-# หน้าเว็บเหลือเวลาเยอะไป (เตือนไวไป) -> ให้ใส่ค่าลบเยอะขึ้น เช่น -54, -60, -70
-# หน้าเว็บเวลาน้อยไป (เตือนช้าไป/กดไม่ทัน) -> ให้ใส่ค่าบวก เช่น 10, 20
-OFFSET_SECONDS = -54 
+# 🛠 ปรับเวลากลับมาที่ -144 เพื่อให้จังหวะแจ้งเตือนตรงล็อกเดิมที่คุณโอเคแล้ว
+OFFSET_SECONDS = -144 
 
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
@@ -79,7 +77,6 @@ def send_telegram_message(text):
         print(f"[ERROR] Telegram: {e}")
 
 def get_secs_left():
-    """คำนวณเวลาที่เหลือในรอบ sync กับนาฬิกา Unix จริง และใช้ OFFSET เพื่อปรับจูน"""
     unix_now = time.time() + OFFSET_SECONDS
     sec_in_round = unix_now % 300   
     secs_left = 300 - sec_in_round  
@@ -87,7 +84,7 @@ def get_secs_left():
     return secs_left, round_id
 
 def main():
-    send_telegram_message("✅ Bot v12 (Adjusted Timer) ปรับเวลาหน่วงลง 54 วินาที เริ่มงานแล้ว! 🚀")
+    send_telegram_message("✅ Bot ปรับตรรกะบวกเวลาหลังเตือนเพิ่ม 10 วิ ในข้อความแล้วครับ! 🚀")
 
     last_alerted_round = -1
 
@@ -114,7 +111,10 @@ def main():
                     else:
                         action = "⏸ แนะนำ: ข้ามรอบนี้"
 
+                    # คำนวณเวลาปัจจุบันหลังดึงข้อมูลเสร็จ แล้วบวกเพิ่ม 10 วินาทีตามที่ต้องการในข้อความ
                     secs_left_now, _ = get_secs_left()
+                    display_secs = secs_left_now + 10
+                    
                     msg = (
                         f"🔮 PancakeSwap Prediction\n"
                         f"━━━━━━━━━━━━━━━\n"
@@ -123,7 +123,7 @@ def main():
                         f"💰 ราคา: ${price:.4f}\n"
                         f"📊 {reason}\n"
                         f"━━━━━━━━━━━━━━━\n"
-                        f"⏳ เวลาหน้าเว็บน่าจะเหลือ: ~{secs_left_now:.0f}s\n"
+                        f"⏳ เหลือเวลาแทง: ~{display_secs:.0f}s\n"
                         f"🕐 เวลาจริง: {now.strftime('%H:%M:%S')}"
                     )
                     send_telegram_message(msg)
