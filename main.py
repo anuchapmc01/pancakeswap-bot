@@ -39,39 +39,50 @@ def get_signal(df_1m, df_3m):
     if any(pd.isna(l1[c]) for c in required) or pd.isna(l3['ema_50']):
         return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ (NaN)"
 
-    price  = l1['close']
-    vol_ok = l1['v'] > l1['vol_ma20']
+    price = l1['close']
+
+    # ✅ ผ่อน Volume — แค่ไม่ต่ำกว่า 60% ของ MA20
+    vol_ok = l1['v'] > l1['vol_ma20'] * 0.6
+
     trend_up   = l1['close'] > l1['ema_50'] and l3['close'] > l3['ema_50']
     trend_down = l1['close'] < l1['ema_50'] and l3['close'] < l3['ema_50']
 
-    if (trend_up and 40 < l1['rsi'] < 72 and
-        l1['macd'] > l1['macd_signal'] and l1['stoch'] < 78 and vol_ok):
+    # === UP ===
+    if (trend_up and
+        38 < l1['rsi'] < 75 and
+        l1['macd'] > l1['macd_signal'] and
+        l1['stoch'] < 85 and
+        vol_ok):
         reason = "\n".join([
             f"✅ Trend UP (1m & 3m)",
-            f"✅ RSI: {l1['rsi']:.1f}",
+            f"✅ RSI: {l1['rsi']:.1f} (38-75)",
             f"✅ MACD: Bullish",
-            f"✅ Stoch: {l1['stoch']:.1f}",
-            f"✅ Volume: {l1['v']:.0f} > MA {l1['vol_ma20']:.0f}"
+            f"✅ Stoch: {l1['stoch']:.1f} < 85",
+            f"✅ Vol: {l1['v']:.1f} > 60% MA ({l1['vol_ma20']*0.6:.1f})"
         ])
         return "UP 🟢", price, reason
 
-    elif (trend_down and 28 < l1['rsi'] < 58 and
-          l1['macd'] < l1['macd_signal'] and l1['stoch'] > 22 and vol_ok):
+    # === DOWN ===
+    elif (trend_down and
+          25 < l1['rsi'] < 60 and
+          l1['macd'] < l1['macd_signal'] and
+          l1['stoch'] > 15 and
+          vol_ok):
         reason = "\n".join([
             f"✅ Trend DOWN (1m & 3m)",
-            f"✅ RSI: {l1['rsi']:.1f}",
+            f"✅ RSI: {l1['rsi']:.1f} (25-60)",
             f"✅ MACD: Bearish",
-            f"✅ Stoch: {l1['stoch']:.1f}",
-            f"✅ Volume: {l1['v']:.0f} > MA {l1['vol_ma20']:.0f}"
+            f"✅ Stoch: {l1['stoch']:.1f} > 15",
+            f"✅ Vol: {l1['v']:.1f} > 60% MA ({l1['vol_ma20']*0.6:.1f})"
         ])
         return "DOWN 🔴", price, reason
 
-    # NEUTRAL — บอกเหตุผลละเอียด
+    # NEUTRAL — บอกเหตุผล
     miss = []
     if not vol_ok:
-        miss.append(f"Volume ต่ำ ({l1['v']:.0f} < MA {l1['vol_ma20']:.0f})")
+        miss.append(f"Volume ต่ำ ({l1['v']:.1f} < 60%MA {l1['vol_ma20']*0.6:.1f})")
     if not trend_up and not trend_down:
-        miss.append(f"Trend ขัดแย้ง (1m vs 3m)")
+        miss.append("Trend 1m/3m ขัดแย้งกัน")
     if l1['macd'] == l1['macd_signal']:
         miss.append("MACD ไม่ชัด")
     miss.append(f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}")
@@ -85,12 +96,12 @@ def send_telegram_message(text):
             data={'chat_id': TELEGRAM_CHAT_ID, 'text': text},
             timeout=10
         )
-        print(f"[TG] {r.status_code} | {text[:50]}")
+        print(f"[TG] {r.status_code} | {text[:60]}")
     except Exception as e:
         print(f"[ERROR] Telegram: {e}")
 
 def main():
-    send_telegram_message("✅ Bot v4 เริ่มงานแล้ว — ส่งสัญญาณทุก 5 นาที 🚀")
+    send_telegram_message("✅ Bot v5 (Relaxed Volume + Wider Zone) เริ่มงานแล้ว! 🚀")
 
     while True:
         now = datetime.now()
@@ -102,10 +113,9 @@ def main():
 
             if not df1.empty and not df3.empty:
                 signal, price, reason = get_signal(df1, df3)
-
                 msg = (
                     f"🔮 BNB/USDT — 5min Prediction\n"
-                    f"📍 สัญญาณ: {signal}\n"
+                    f"📍 สญญาณ: {signal}\n"
                     f"💰 ราคา: ${price:.4f}\n"
                     f"📊 {reason}\n"
                     f"⏳ เวลา: {now.strftime('%H:%M:%S')}"
@@ -115,10 +125,9 @@ def main():
                 send_telegram_message(f"⚠️ ดึงข้อมูลไม่ได้ [{now.strftime('%H:%M:%S')}]")
 
         except Exception as e:
-            print(f"[ERROR] main loop: {e}")
+            print(f"[ERROR] main: {e}")
             send_telegram_message(f"❌ Error: {e}")
 
-        # ✅ รอ 5 นาทีตรงๆ ไม่ต้องเช็คเวลาเลย
         print("[LOOP] รอ 5 นาที...")
         time.sleep(300)
 
