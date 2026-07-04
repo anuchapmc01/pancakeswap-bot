@@ -8,8 +8,8 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
 
-# 🛠 ปรับเวลากลับมาที่ -180 เพื่อให้จังหวะแจ้งเตือนตรงล็อกเดิมที่คุณโอเคแล้ว
-OFFSET_SECONDS = -180
+# 🛠 ปรับเวลาหน่วงไป 120 วินาที (2 นาทีเป๊ะ) เพื่อแก้ปัญหาเวลาดิฟกัน 2 นาที
+OFFSET_SECONDS = -120 
 
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
@@ -84,7 +84,7 @@ def get_secs_left():
     return secs_left, round_id
 
 def main():
-    send_telegram_message("✅ Bot ปรับตรรกะบวกเวลาหลังเตือนเพิ่ม 10 วิ ในข้อความแล้วครับ! 🚀")
+    send_telegram_message("✅ Bot ปรับแก้เวลาดิฟ 2 นาที (-120 วิ) เรียบร้อยแล้วครับ! 🚀")
 
     last_alerted_round = -1
 
@@ -111,7 +111,7 @@ def main():
                     else:
                         action = "⏸ แนะนำ: ข้ามรอบนี้"
 
-                    # คำนวณเวลาปัจจุบันหลังดึงข้อมูลเสร็จ แล้วบวกเพิ่ม 10 วินาทีตามที่ต้องการในข้อความ
+                    # คำนวณเวลาปัจจุบันหลังดึงข้อมูลเสร็จ แล้วบวกเพิ่ม 10 วินาทีในข้อความ
                     secs_left_now, _ = get_secs_left()
                     display_secs = secs_left_now + 10
                     
