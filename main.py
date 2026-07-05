@@ -26,13 +26,11 @@ def get_binance_data(interval="1m", limit=100):
         return pd.DataFrame()
 
 def analyze_trend(df_1m, df_3m):
-    # คำนวณอินดิเคเตอร์ 1 นาที
     df_1m['rsi'] = ta.momentum.RSIIndicator(df_1m['close'], window=14).rsi()
     df_1m['ema_20'] = ta.trend.EMAIndicator(df_1m['close'], window=20).ema_indicator()
     stoch_1m = ta.momentum.StochasticOscillator(df_1m['high'], df_1m['low'], df_1m['close'])
     df_1m['stoch'] = stoch_1m.stoch()
     
-    # คำนวณอินดิเคเตอร์ 3 นาที
     df_3m['ema_20'] = ta.trend.EMAIndicator(df_3m['close'], window=20).ema_indicator()
     
     l1 = df_1m.iloc[-1]
@@ -73,53 +71,59 @@ def send_telegram_message(text):
         pass
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v23 (ปรับช้าลงอีก 1.10 นาที) เริ่มทำงานแล้วครับ! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v24 (ระบบหน่วง 10 วิหลังส่ง + นับถอยหลังตามสั่ง) เริ่มงานแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Monitoring time by updated local clock offset...")
+    print("Bot started. Waiting for first alignment at XX:X2:10 or XX:X7:10...")
     
-    last_alerted_minute = -1
+    # 🎯 ตั้งหลักรอบแรกให้ตรงนาทีลงท้ายด้วย 2 หรือ 7 ณ วินาทีที่ 10 ของเครื่องก่อน
+    while True:
+        now = datetime.now()
+        if (now.minute % 5 == 2 or now.minute % 5 == 7) and now.second == 10:
+            break
+        time.sleep(0.5)
 
     while True:
         try:
             now = datetime.now()
+            print(f"[{now.strftime('%H:%M:%S')}] ถึงจังหวะประมวลผลสัญญาณ...")
             
-            # 🎯 ดึงเวลาให้ช้าลงอีก 1 นาที 10 วินาทีดื้อๆ 
-            # เปลี่ยนมาล็อกเงื่อนไขทำงานที่ นาทีลงท้ายด้วย 2 และ 7 ณ วินาทีที่ 10 เป๊ะๆ
-            if (now.minute % 5 == 2 or now.minute % 5 == 7) and now.second == 10:
-                if now.minute != last_alerted_minute:
-                    print(f"[{now.strftime('%H:%M:%S')}] ถึงเป้าหมายเวลาล็อกใหม่! กำลังประมวลผล...")
-                    
-                    df1 = get_binance_data(interval="1m")
-                    df3 = get_binance_data(interval="3m")
-                    
-                    if not df1.empty and not df3.empty:
-                        signal, price, reason, est_lock = analyze_trend(df1, df3)
-                        
-                        action = "👆 แนะนำ: กด ENTER UP" if "UP" in signal else "👇 แนะนำ: กด ENTER DOWN" if "DOWN" in signal else "⏸ แนะนำ: ข้ามรอบนี้"
-                        
-                        msg = (
-                            f"🔮 PancakeSwap 5m Prediction\n"
-                            f"━━━━━━━━━━━━━━━\n"
-                            f"📍 สัญญาณ: {signal}\n"
-                            f"{action}\n"
-                            f"💰 ราคา: ${price:.4f}\n"
-                            f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.4f}\n"
-                            f"📊 {reason}\n"
-                            f"━━━━━━━━━━━━━━━\n"
-                            f"⏳ เหลือเวลาแทงก่อนปุ่มปิด: ~30s\n"
-                            f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
-                        )
-                        
-                        send_telegram_message(msg)
-                        last_alerted_minute = now.minute
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสำเร็จในรอบนาทีที่ {now.minute}")
+            df1 = get_binance_data(interval="1m")
+            df3 = get_binance_data(interval="3m")
             
-            # เช็กเวลาถี่ยิบทุก 0.5 วิ เพื่อความแม่นยำไม่พลาดวินาทีที่ 10
-            time.sleep(0.5)
-            
+            if not df1.empty and not df3.empty:
+                signal, price, reason, est_lock = analyze_trend(df1, df3)
+                
+                action = "👆 แนะนำ: กด ENTER UP" if "UP" in signal else "👇 แนะนำ: กด ENTER DOWN" if "DOWN" in signal else "⏸ แนะนำ: ข้ามรอบนี้"
+                
+                msg = (
+                    f"🔮 PancakeSwap 5m Prediction\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"📍 สัญญาณ: {signal}\n"
+                    f"{action}\n"
+                    f"💰 ราคา: ${price:.4f}\n"
+                    f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.4f}\n"
+                    f"📊 {reason}\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"⏳ เหลือเวลาแทงก่อนปุ่มปิด: ~30s\n"
+                    f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
+                )
+                
+                send_telegram_message(msg)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสัญญาณสำเร็จ")
+                
+                # 📌 1. แจ้งเตือนเสร็จปุ๊บ -> สั่งนับหน่วง 10 วินาทีตามที่พี่ทักท้วงทันที!
+                print("-> [ACTION] เริ่มนับหน่วงเวลาช่วงปิดระบบเว็บ 10 วินาที...")
+                time.sleep(10)
+                
+                # 📌 2. พอครบ 10 วิปุ๊บ -> เริ่มลูปรอนับถอยหลังยาวอีก 260 วินาที เพื่อไปโผล่ที่จุดเดิมในรอบถัดไป
+                print("-> [ACTION] ครบ 10 วิ เริ่มเข้าลูปนับถอยหลังอีก 260 วินาทีเพื่อรอส่งรอบหน้า...")
+                time.sleep(260)
+            else:
+                print("ดึงข้อมูลพลาด รอ 5 วิ...")
+                time.sleep(5)
         except Exception as e:
             print(f"Error: {e}")
-            time.sleep(2)
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
