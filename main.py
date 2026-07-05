@@ -2,7 +2,7 @@ import time
 import requests
 import pandas as pd
 import ta
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -57,26 +57,27 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap (ระบบชดเชยเวลาดีเลย์บล็อกเชน +10 วิ) เริ่มทำงานแล้ว! 🚀"
+    startup_msg = "✅ บอท PancakeSwap ปรับเวลาเริ่มต้นช้าลงอีก 25 วิ เรียบร้อยแล้ว! 🚀"
     send_telegram_message(startup_msg)
     print("Bot started.")
     
     last_alerted_minute = -1
-    accumulated_delay = 0  # ตัวแปรเก็บเวลาสะสมที่จะบวกเพิ่มทุกรอบ
+    
+    # 🛠 ตั้งค่าเริ่มต้นที่ 25 เพื่อให้บอทแจ้งเตือนช้าลงอีก 25 วินาทีตั้งแต่รอบแรก
+    accumulated_delay = 25  
 
     while True:
         now = datetime.now()
         
-        # คำนวณเวลาฐาน + เวลาหน่วงสะสมสะท้อนตามจริงของเว็บ
-        target_second = 0 + accumulated_delay
-        
-        # จัดการวินาทีถ้าเกิน 60 ให้ปัดนาทีขยับตามอัตโนมัติ
+        target_second = accumulated_delay
         check_minute = now.minute
+        
+        # จัดการวินาทีถ้าสะสมจนเกิน 60 ให้ขยับนาทีตามอัตโนมัติ
         if target_second >= 60:
-            check_minute -= (target_second // 60)
+            check_minute += (target_second // 60)
             target_second = target_second % 60
 
-        # ตรวจสอบรอบเวลาเดิม (นาทีลงท้ายด้วย 1 หรือ 6)
+        # ทำงานที่นาทีลงท้ายด้วย 1 หรือ 6 ตามบล็อกเวลาหลัก
         if (check_minute % 5 == 1 or check_minute % 5 == 6) and now.second == target_second:
             if now.minute != last_alerted_minute:
                 try:
@@ -113,11 +114,11 @@ def main():
                     send_telegram_message(msg)
                     last_alerted_minute = now.minute
                     
-                    # 📌 หัวใจสำคัญ: ส่งเสร็จแล้ว บวกเพิ่มอีก 10 วินาทีสำหรับไปใช้คำนวณถอยหลังในรอบหน้า
+                    # หลังส่งเสร็จในแต่ละรอบ ให้บวกเพิ่มอีก 10 วินาทีตามตรรกะเดิม เพื่อกันเวลาดีเลย์สะสมของเว็บ
                     accumulated_delay += 10
-                    print(f"[{now.strftime('%H:%M:%S')}] สัญญาณส่งแล้ว -> ปรับเพิ่มเวลาหน่วงรอบถัดไปเป็น +{accumulated_delay} วิ")
+                    print(f"[{now.strftime('%H:%M:%S')}] ส่งสัญญาณแล้ว -> ปรับเพิ่มเวลาหน่วงรอบถัดไปเป็น +{accumulated_delay} วิ")
                     
-                    time.sleep(70)  # พักลูปยาวกันเบิ้ล
+                    time.sleep(70)  
                 except Exception as e:
                     print(f"Error: {e}")
                     time.sleep(5)
