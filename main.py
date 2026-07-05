@@ -8,8 +8,8 @@ import os
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
-    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+def get_binance_data(interval="1m", limit=100):
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
     try:
         response = requests.get(url).json()
         if isinstance(response, dict) and 'code' in response:
@@ -19,37 +19,50 @@ def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
             'close_time', 'quote_asset_volume', 'trades',
             'taker_buy_base', 'taker_buy_quote', 'ignore'
         ])
-        df['close'] = pd.to_numeric(df['close'])
-        df['open'] = pd.to_numeric(df['open'])
+        for col in ['close', 'open', 'high', 'low']:
+            df[col] = pd.to_numeric(df[col])
         return df
     except:
         return pd.DataFrame()
 
-def analyze_trend(df):
-    df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-    df['ema_9'] = ta.trend.EMAIndicator(df['close'], window=9).ema_indicator()
-    df['ema_21'] = ta.trend.EMAIndicator(df['close'], window=21).ema_indicator()
-    df['ema_50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
+def analyze_trend(df_1m, df_3m):
+    # คำนวณอินดิเคเตอร์ 1 นาที
+    df_1m['rsi'] = ta.momentum.RSIIndicator(df_1m['close'], window=14).rsi()
+    df_1m['ema_20'] = ta.trend.EMAIndicator(df_1m['close'], window=20).ema_indicator()
+    stoch_1m = ta.momentum.StochasticOscillator(df_1m['high'], df_1m['low'], df_1m['close'])
+    df_1m['stoch'] = stoch_1m.stoch()
     
-    macd = ta.trend.MACD(df['close'])
-    df['macd_line'] = macd.macd()
-    df['macd_signal'] = macd.macd_signal()
-
-    latest = df.iloc[-1]
-    price_velocity = latest['close'] - latest['open'] 
-    estimated_lock_price = latest['close'] + (price_velocity * 0.5)
+    # คำนวณอินดิเคเตอร์ 3 นาที
+    df_3m['ema_20'] = ta.trend.EMAIndicator(df_3m['close'], window=20).ema_indicator()
+    
+    l1 = df_1m.iloc[-1]
+    l3 = df_3m.iloc[-1]
+    
+    ema_diff_1m = (l1['close'] - l1['ema_20']) / l1['ema_20'] * 100
+    ema_diff_3m = (l3['close'] - l3['ema_20']) / l3['ema_20'] * 100
+    
+    price_velocity = l1['close'] - l1['open']
+    estimated_lock_price = l1['close'] + (price_velocity * 0.5)
     
     signal = "WAIT"
-    if (latest['close'] > latest['ema_50'] and latest['ema_9'] > latest['ema_21'] and 
-        latest['macd_line'] > latest['macd_signal'] and 45 <= latest['rsi'] <= 65 and
-        estimated_lock_price > latest['close']): 
+    reason = "⏸ สัญญาณยังไม่ชัดเจน"
+    
+    if (ema_diff_3m > -0.05 and ema_diff_1m > -0.05 and 
+        35 < l1['rsi'] < 78 and l1['stoch'] < 88 and 
+        estimated_lock_price > l1['close']):
         signal = "UP 🟢"
-    elif (latest['close'] < latest['ema_50'] and latest['ema_9'] < latest['ema_21'] and 
-          latest['macd_line'] < latest['macd_signal'] and 35 <= latest['rsi'] <= 55 and
-          estimated_lock_price < latest['close']): 
-        signal = "DOWN 🔴"
+        reason = f"✅ ราคาใกล้/เหนือ EMA20\n✅ RSI: {l1['rsi']:.1f}\n✅ Stoch: {l1['stoch']:.1f}\n📈 EMA diff 1m: {ema_diff_1m:+.3f}%"
         
-    return signal, latest['close'], latest['rsi'], estimated_lock_price
+    elif (ema_diff_3m < 0.05 and ema_diff_1m < 0.05 and 
+          22 < l1['rsi'] < 65 and l1['stoch'] > 12 and 
+          estimated_lock_price < l1['close']):
+        signal = "DOWN 🔴"
+        reason = f"✅ ราคาใกล้/ต่ำกว่า EMA20\n✅ RSI: {l1['rsi']:.1f}\n✅ Stoch: {l1['stoch']:.1f}\n📉 EMA diff 1m: {ema_diff_1m:+.3f}%"
+    
+    if signal == "WAIT":
+        reason = f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}\nEMA diff 1m: {ema_diff_1m:+.3f}% | 3m: {ema_diff_3m:+.3f}%"
+        
+    return signal, l1['close'], reason, estimated_lock_price
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -57,68 +70,53 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v17 (ระบบหน่วง 10 วิหลังส่ง + นับถอยหลัง) เริ่มทำงานแล้ว! 🚀\nบอทจะส่งสัญญาณรอบแรกในอีกไม่กี่นาทีเมื่อถึงจังหวะครับ"
+    startup_msg = "✅ บอท PancakeSwap v19 (ระบบ Real-time Clock Sync 1m+3m) เริ่มงานแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Waiting for the first alignment...")
+    print("Bot started. Monitoring time continuously...")
     
-    # รอบแรกสุด: ให้บอทเริ่มวิ่งตอนนาทีที่ลงท้ายด้วย 4 หรือ 9 ณ วินาทีที่ 30 เพื่อตั้งต้นให้ตรงกับเว็บก่อน
-    while True:
-        now = datetime.now()
-        if (now.minute % 5 == 4) and now.second == 30:
-            break
-        time.sleep(0.5)
+    last_alerted_minute = -1
 
     while True:
         try:
             now = datetime.now()
-            print(f"[{now.strftime('%H:%M:%S')}] ถึงจังหวะวิเคราะห์รอบปัจจุบัน -> กำลังดึงข้อมูล...")
             
-            df = get_binance_data()
-            if not df.empty:
-                signal, price, rsi, est_lock = analyze_trend(df)
-                
-                if signal != "WAIT":
-                    msg = (
-                        f"🔮 PancakeSwap 5m Prediction\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"📍 สัญญาณ: {signal}\n"
-                        f"💰 ราคา BNB ปัจจุบัน: ${price:.2f}\n"
-                        f"🎯 คาดการณ์ราคาสัญญาณล็อก: ${est_lock:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"⏳ รีบลงเดิมพันด่วน! (เหลือเวลาประมาณ 30 วิ)\n"
-                        f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
-                    )
-                else:
-                    msg = (
-                        f"⏸ PancakeSwap 5m Prediction\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
-                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
-                        f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
-                    )
-                
-                send_telegram_message(msg)
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งข้อความเสร็จสิ้น")
-                
-                # 📌 1. ส่งเสร็จปุ๊บ -> สั่งบอทหยุดนิ่งรอระบบเว็บเคลียร์บล็อก 10 วินาทีทันทีตามที่พี่สั่ง
-                print("-> เริ่มหน่วงเวลาระบบปิดของเว็บ 10 วินาที...")
-                time.sleep(10)
-                
-                # 📌 2. พอครบ 10 วิระบบเว็บเริ่มนับรอบใหม่ -> บอทเริ่มนับถอยหลังอีก 4 นาที 20 วินาที (260 วิ) เพื่อไปเจอ 30 วิสุดท้ายของรอบถัดไป
-                print("-> ครบ 10 วิ เริ่มเข้าสู่ลูปนับถอยหลัง 260 วินาทีเพื่อรอส่งรอบหน้า...")
-                time.sleep(260) 
-                
-            else:
-                print("ดึงข้อมูลพลาด รออีก 5 วิเพื่อลองใหม่...")
-                time.sleep(5)
-                
+            # 🎯 ล็อกเวลาชนกับหน้าปัดนาฬิกาตรงๆ: นาทีลงท้ายด้วย 4 และ 9 ณ วินาทีที่ 25 เป๊ะๆ
+            if (now.minute % 5 == 4) and now.second == 25:
+                # ป้องกันการส่งซ้ำในนาทีเดียวกัน
+                if now.minute != last_alerted_minute:
+                    print(f"[{now.strftime('%H:%M:%S')}] ถึงเป้าหมายเวลาล็อก! กำลังคำนวณสัญญาน...")
+                    
+                    df1 = get_binance_data(interval="1m")
+                    df3 = get_binance_data(interval="3m")
+                    
+                    if not df1.empty and not df3.empty:
+                        signal, price, reason, est_lock = analyze_trend(df1, df3)
+                        
+                        action = "👆 แนะนำ: กด ENTER UP" if "UP" in signal else "👇 แนะนำ: กด ENTER DOWN" if "DOWN" in signal else "⏸ แนะนำ: ข้ามรอบนี้"
+                        
+                        msg = (
+                            f"🔮 PancakeSwap 5m Prediction\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"📍 สัญญาณ: {signal}\n"
+                            f"{action}\n"
+                            f"💰 ราคา: ${price:.4f}\n"
+                            f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.4f}\n"
+                            f"📊 {reason}\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"⏳ เหลือเวลาแทง: ~35s (ระบบบวกหน่วง 10 วิรอยต่อให้แล้ว)\n"
+                            f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
+                        )
+                        
+                        send_telegram_message(msg)
+                        last_alerted_minute = now.minute
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสัญญาณสำเร็จรอบนาทีที่ {now.minute}")
+            
+            # ปล่อยให้ลูปตื่นมาเช็กเวลาทุก 0.5 วินาที เพื่อไม่ให้พลาดวินาทีที่ 25
+            time.sleep(0.5)
+            
         except Exception as e:
             print(f"Error: {e}")
-            time.sleep(5)
+            time.sleep(2)
 
 if __name__ == "__main__":
     main()
