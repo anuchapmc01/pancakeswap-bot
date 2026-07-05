@@ -21,7 +21,6 @@ def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
         ])
         df['close'] = pd.to_numeric(df['close'])
         df['open'] = pd.to_numeric(df['open'])
-        df['timestamp'] = pd.to_numeric(df['timestamp'])
         return df
     except:
         return pd.DataFrame()
@@ -58,67 +57,68 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v15 (ล็อกเป้าหมาย 30 วิสุดท้ายถาวร) เริ่มทำงานแล้วครับ! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v17 (ระบบหน่วง 10 วิหลังส่ง + นับถอยหลัง) เริ่มทำงานแล้ว! 🚀\nบอทจะส่งสัญญาณรอบแรกในอีกไม่กี่นาทีเมื่อถึงจังหวะครับ"
     send_telegram_message(startup_msg)
-    print("Bot started.")
+    print("Bot started. Waiting for the first alignment...")
     
-    last_alerted_round = -1
+    # รอบแรกสุด: ให้บอทเริ่มวิ่งตอนนาทีที่ลงท้ายด้วย 4 หรือ 9 ณ วินาทีที่ 30 เพื่อตั้งต้นให้ตรงกับเว็บก่อน
+    while True:
+        now = datetime.now()
+        if (now.minute % 5 == 4) and now.second == 30:
+            break
+        time.sleep(0.5)
 
     while True:
         try:
             now = datetime.now()
+            print(f"[{now.strftime('%H:%M:%S')}] ถึงจังหวะวิเคราะห์รอบปัจจุบัน -> กำลังดึงข้อมูล...")
             
-            # คำนวณหาตำแหน่งวินาทีในรอบ 5 นาทีปัจจุบันของนาฬิกาเครื่อง (0 - 299 วินาที)
-            current_secs_in_round = (now.minute % 5) * 60 + now.second
-            
-            # 🎯 ล็อกเป้าหมาย: บอทจะส่งสัญญาณก็ต่อเมื่อเวลาของรอบเดินไปถึงวินาทีที่ 265 
-            # ซึ่งในจังหวะนี้หน้าเว็บของพี่จะเหลือเวลานับถอยหลังประมาณ 30-35 วินาทีสุดท้ายพอดีเป๊ะ
-            if current_secs_in_round == 265:
-                # คำนวณ ID ของรอบปัจจุบันเพื่อป้องกันการส่งซ้ำ
-                current_round_id = (now.hour * 12) + (now.minute // 5)
+            df = get_binance_data()
+            if not df.empty:
+                signal, price, rsi, est_lock = analyze_trend(df)
                 
-                if current_round_id != last_alerted_round:
-                    df = get_binance_data()
-                    if df.empty:
-                        continue
-                        
-                    signal, price, rsi, est_lock = analyze_trend(df)
-                    
-                    if signal != "WAIT":
-                        msg = (
-                            f"🔮 PancakeSwap 5m Prediction\n"
-                            f"━━━━━━━━━━━━━━━\n"
-                            f"📍 สัญญาณ: {signal}\n"
-                            f"💰 ราคา BNB ปัจจุบัน: ${price:.2f}\n"
-                            f"🎯 คาดการณ์ราคาสัญญาณล็อก: ${est_lock:.2f}\n"
-                            f"📊 RSI (1m): {rsi:.2f}\n"
-                            f"━━━━━━━━━━━━━━━\n"
-                            f"⏳ รีบลงเดิมพันด่วน! (เหลือประมาณ 30 วิ)\n"
-                            f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
-                        )
-                    else:
-                        msg = (
-                            f"⏸ PancakeSwap 5m Prediction\n"
-                            f"━━━━━━━━━━━━━━━\n"
-                            f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
-                            f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
-                            f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.2f}\n"
-                            f"📊 RSI (1m): {rsi:.2f}\n"
-                            f"━━━━━━━━━━━━━━━\n"
-                            f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
-                        )
-                    
-                    send_telegram_message(msg)
-                    last_alerted_round = current_round_id
-                    
-                    # พักระบบ 10 วินาทีเพื่อป้องกันลูปวินาทีเดิมทำงานซ้ำ
-                    time.sleep(10)
-                    
+                if signal != "WAIT":
+                    msg = (
+                        f"🔮 PancakeSwap 5m Prediction\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"📍 สัญญาณ: {signal}\n"
+                        f"💰 ราคา BNB ปัจจุบัน: ${price:.2f}\n"
+                        f"🎯 คาดการณ์ราคาสัญญาณล็อก: ${est_lock:.2f}\n"
+                        f"📊 RSI (1m): {rsi:.2f}\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"⏳ รีบลงเดิมพันด่วน! (เหลือเวลาประมาณ 30 วิ)\n"
+                        f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
+                    )
+                else:
+                    msg = (
+                        f"⏸ PancakeSwap 5m Prediction\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
+                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
+                        f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.2f}\n"
+                        f"📊 RSI (1m): {rsi:.2f}\n"
+                        f"━━━━━━━━━━━━━━━\n"
+                        f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
+                    )
+                
+                send_telegram_message(msg)
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งข้อความเสร็จสิ้น")
+                
+                # 📌 1. ส่งเสร็จปุ๊บ -> สั่งบอทหยุดนิ่งรอระบบเว็บเคลียร์บล็อก 10 วินาทีทันทีตามที่พี่สั่ง
+                print("-> เริ่มหน่วงเวลาระบบปิดของเว็บ 10 วินาที...")
+                time.sleep(10)
+                
+                # 📌 2. พอครบ 10 วิระบบเว็บเริ่มนับรอบใหม่ -> บอทเริ่มนับถอยหลังอีก 4 นาที 20 วินาที (260 วิ) เพื่อไปเจอ 30 วิสุดท้ายของรอบถัดไป
+                print("-> ครบ 10 วิ เริ่มเข้าสู่ลูปนับถอยหลัง 260 วินาทีเพื่อรอส่งรอบหน้า...")
+                time.sleep(260) 
+                
+            else:
+                print("ดึงข้อมูลพลาด รออีก 5 วิเพื่อลองใหม่...")
+                time.sleep(5)
+                
         except Exception as e:
             print(f"Error: {e}")
-            time.sleep(2)
-            
-        time.sleep(0.2)
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
