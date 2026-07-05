@@ -40,29 +40,26 @@ def analyze_trend(df):
 
     latest = df.iloc[-1]
     
-    # --- 🛠 ส่วนคำนวณคาดการณ์ราคาล่วงหน้า (Price Estimation) ---
     # คำนวณความต่างของราคาในแท่งปัจจุบันเพื่อดูแรงส่งระดับวินาที
     price_velocity = latest['close'] - latest['open'] 
     
-    # กะประมาณราคาที่จะล็อกล่วงหน้าในอีก 30 วินาทีข้างหน้า (Estimated Locked Price)
-    # โดยอิงจากราคาล่าสุด + (แรงส่ง * ค่าสัมประสิทธิ์ความหน่วงเวลา)
+    # คาดการณ์ราคาที่จะล็อกล่วงหน้า (Estimated Locked Price)
     estimated_lock_price = latest['close'] + (price_velocity * 0.5)
     
     signal = "WAIT"
     
-    # เพิ่มเงื่อนไข: ราคาคาดการณ์ต้องสนับสนุนทิศทางเทรนด์ด้วย
     if (latest['close'] > latest['ema_50'] and 
         latest['ema_9'] > latest['ema_21'] and 
         latest['macd_line'] > latest['macd_signal'] and 
         45 <= latest['rsi'] <= 65 and
-        estimated_lock_price > latest['close']): # ราคาคาดการณ์ต้องสูงกว่าราคาปัจจุบัน
+        estimated_lock_price > latest['close']): 
         signal = "UP 🟢"
         
     elif (latest['close'] < latest['ema_50'] and 
           latest['ema_9'] < latest['ema_21'] and 
           latest['macd_line'] < latest['macd_signal'] and 
           35 <= latest['rsi'] <= 55 and
-          estimated_lock_price < latest['close']): # ราคาคาดการณ์ต้องต่ำกว่าราคาปัจจุบัน
+          estimated_lock_price < latest['close']): 
         signal = "DOWN 🔴"
         
     return signal, latest['close'], latest['rsi'], estimated_lock_price
@@ -75,7 +72,7 @@ def send_telegram_message(text):
         print(f"Telegram Error: {res}")
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap (ระบบคาดการณ์ Locked Price ล่วงหน้า) เริ่มทำงานแล้ว! 🚀"
+    startup_msg = "✅ บอท PancakeSwap ปรับดีเลย์ให้ช้าลง 1 นาที 30 วินาที เรียบร้อยแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
     print("Bot started. Startup message sent.")
     
@@ -84,8 +81,8 @@ def main():
     while True:
         now = datetime.now()
         
-        # ทำงานนาทีที่ 4 และ 9 วินาทีที่ 30 (เหลือ 30 วิสุดท้ายก่อนปุ่มล็อก)
-        if now.minute % 5 == 4 and now.second == 30:
+        # 🛠 ปรับเวลาใหม่: ทำงานที่นาทีลงท้ายด้วย 1 และ 6 ณ วินาทีที่ 00 เป๊ะๆ (ช้าลง 1m 30s จากเดิม)
+        if (now.minute % 5 == 1 or now.minute % 5 == 6) and now.second == 0:
             if now.minute != last_alerted_minute:
                 try:
                     df = get_binance_data()
@@ -103,9 +100,9 @@ def main():
                             f"📍 สัญญาณ: {signal}\n"
                             f"💰 ราคา BNB ปัจจุบัน: ${price:.2f}\n"
                             f"🎯 คาดการณ์ราคาสัญญาณล็อก: ${est_lock:.2f}\n"
-                            f" Bars📊 RSI (1m): {rsi:.2f}\n"
+                            f"📊 RSI (1m): {rsi:.2f}\n"
                             f"━━━━━━━━━━━━━━━\n"
-                            f"⏳ รีบลงเดิมพันภายใน 20 วินาที!\n"
+                            f"⏳ รีบลงเดิมพันด่วน!\n"
                             f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
                         )
                         send_telegram_message(msg)
