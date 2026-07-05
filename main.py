@@ -71,14 +71,14 @@ def send_telegram_message(text):
         pass
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v25 (ดีเลย์รอบแรก 2.30 นาที + หน่วง 10 วิหลังส่ง) พร้อมลุยครับ! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v26 (ปรับรอบแรกไวขึ้น 1.30 นาที + หน่วง 10 วิหลังส่ง) พร้อมลุยครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Waiting for first alignment at XX:X4:40 or XX:X9:40...")
+    print("Bot started. Waiting for first alignment at XX:X3:10 or XX:X8:10...")
     
-    # 🎯 1. ตั้งหลักรอบแรก: ปรับดีเลย์ออกไปอีก 2 นาทีครึ่ง ขยับมาเริ่มที่ นาทีลงท้ายด้วย 4 หรือ 9 ณ วินาทีที่ 40 ของเครื่อง
+    # 🎯 1. ขยับรอบแรกให้ไวขึ้น 1 นาที 30 วินาที: ล็อกเป้าหมายไปเริ่มที่ นาทีลงท้ายด้วย 3 หรือ 8 ณ วินาทีที่ 10 ของเครื่องแทน
     while True:
         now = datetime.now()
-        if (now.minute % 5 == 4 or now.minute % 5 == 9) and now.second == 40:
+        if (now.minute % 5 == 3 or now.minute % 5 == 8) and now.second == 10:
             break
         time.sleep(0.5)
 
@@ -111,7 +111,7 @@ def main():
                 send_telegram_message(msg)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสัญญาณสำเร็จ")
                 
-                # 📌 2. ส่งเสร็จปุ๊บ -> หน่วงรอยต่อเคลียร์ระบบเว็บ 10 วินาทีทันทีตามสั่ง
+                # 📌 2. ส่งเสร็จปุ๊บ -> หน่วงรอยต่อเคลียร์ระบบเว็บ 10 วินาทีทันที
                 print("-> [ACTION] เริ่มนับหน่วงเวลาช่วงปิดระบบเว็บ 10 วินาที...")
                 time.sleep(10)
                 
