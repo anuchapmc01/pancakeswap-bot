@@ -63,50 +63,64 @@ def send_telegram_message(text):
         print(f"Telegram Error: {res}")
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap (แจ้งเตือนทุกรอบ) เริ่มทำงานแล้ว!\nระบบกำลังสแตนด์บายรอจับสัญญาณครับ 🚀"
+    startup_msg = "✅ บอท PancakeSwap (Fix Timer) เริ่มทำงานแล้ว!\nระบบล็อกเวลาตรงตามเครื่องและหน้าเว็บ ไม่เหลื่อมแล้วครับ 🚀"
     send_telegram_message(startup_msg)
     print("Bot started. Startup message sent.")
     
+    # ตัวแปรจำสถานะรอบ เพื่อป้องกันไม่ให้บอทส่งสัญญาณซ้ำในนาทีเดียวกัน
+    last_alerted_minute = -1
+    
     while True:
         now = datetime.now()
+        
+        # ทำงานที่นาทีที่ลงท้ายด้วย 4 และ 9 (เช่น 02:34, 02:39) ณ วินาทีที่ 30 เป๊ะๆ
         if now.minute % 5 == 4 and now.second == 30:
-            try:
-                df = get_binance_data()
-                
-                if df.empty:
-                    print(f"[{now.strftime('%H:%M:%S')}] ไม่สามารถดึงกราฟได้ ข้ามรอบนี้ไปก่อน")
-                    time.sleep(60)
-                    continue
+            # เช็กว่านาทีนี้ยังไม่เคยส่งสัญญาณ
+            if now.minute != last_alerted_minute:
+                try:
+                    df = get_binance_data()
                     
-                signal, price, rsi = analyze_trend(df)
-                
-                if signal != "WAIT":
-                    msg = (
-                        f"🔮 PancakeSwap 5m Prediction\n"
-                        f"📍 สัญญาณ: {signal}\n"
-                        f"💰 ราคา BNB: ${price:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}\n"
-                        f"⏳ รีบลงเดิมพันภายใน 20 วินาที!"
-                    )
-                    send_telegram_message(msg)
-                    print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
-                else:
-                    # เพิ่มส่วนนี้เข้าไป เพื่อแจ้งเตือนตอน Skip
-                    msg = (
-                        f"⏸ PancakeSwap 5m Prediction\n"
-                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
-                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
-                        f"📊 RSI (1m): {rsi:.2f}"
-                    )
-                    send_telegram_message(msg)
-                    print(f"[{now.strftime('%H:%M:%S')}] แจ้งเตือนข้ามรอบนี้ (Skipped).")
+                    if df.empty:
+                        print(f"[{now.strftime('%H:%M:%S')}] ไม่สามารถดึงกราฟได้ ข้ามรอบนี้ไปก่อน")
+                        continue
+                        
+                    signal, price, rsi = analyze_trend(df)
                     
-                time.sleep(60)
-            except Exception as e:
-                print(f"Error: {e}")
-                time.sleep(5)
-        else:
-            time.sleep(1)
+                    if signal != "WAIT":
+                        msg = (
+                            f"🔮 PancakeSwap 5m Prediction\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"📍 สัญญาณ: {signal}\n"
+                            f"💰 ราคา BNB: ${price:.2f}\n"
+                            f"📊 RSI (1m): {rsi:.2f}\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"⏳ รีบลงเดิมพันภายใน 20 วินาที!\n"
+                            f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
+                        )
+                        send_telegram_message(msg)
+                        print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
+                    else:
+                        msg = (
+                            f"⏸ PancakeSwap 5m Prediction\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
+                            f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
+                            f"📊 RSI (1m): {rsi:.2f}\n"
+                            f"━━━━━━━━━━━━━━━\n"
+                            f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
+                        )
+                        send_telegram_message(msg)
+                        print(f"[{now.strftime('%H:%M:%S')}] แจ้งเตือนข้ามรอบนี้ (Skipped).")
+                    
+                    # บันทึกนาทีที่เพิ่งส่งเสร็จ เพื่อล็อกรอบไว้
+                    last_alerted_minute = now.minute
+                    
+                except Exception as e:
+                    print(f"Error: {e}")
+                    time.sleep(5)
+        
+        # ปล่อยให้ลูปเช็กเวลาทุกๆ 0.5 วินาที เพื่อความแม่นยำ ไม่ดีเลย์ข้ามวิ
+        time.sleep(0.5)
 
 if __name__ == "__main__":
     main()
