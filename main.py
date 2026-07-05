@@ -73,9 +73,9 @@ def send_telegram_message(text):
         pass
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v22 (ระบบดีเลย์ตรงเวลาเครื่อง หน่วง 2 นาทีครึ่ง) พร้อมลุยแล้วครับ! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v23 (ปรับช้าลงอีก 1.10 นาที) เริ่มทำงานแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Monitoring time by simple local clock...")
+    print("Bot started. Monitoring time by updated local clock offset...")
     
     last_alerted_minute = -1
 
@@ -83,11 +83,11 @@ def main():
         try:
             now = datetime.now()
             
-            # 🎯 ล็อกเวลาเครื่องตรงๆ: หน่วงเวลาเพิ่ม 2 นาทีครึ่งจากล็อกนาทีที่ 4 และ 9 
-            # (ขยับมาทำงานที่ นาทีลงท้ายด้วย 1 และ 6 ณ วินาทีที่ 00 เป๊ะๆ แทนการไปยุ่งกับวินาทีลอยๆ)
-            if (now.minute % 5 == 1 or now.minute % 5 == 6) and now.second == 0:
+            # 🎯 ดึงเวลาให้ช้าลงอีก 1 นาที 10 วินาทีดื้อๆ 
+            # เปลี่ยนมาล็อกเงื่อนไขทำงานที่ นาทีลงท้ายด้วย 2 และ 7 ณ วินาทีที่ 10 เป๊ะๆ
+            if (now.minute % 5 == 2 or now.minute % 5 == 7) and now.second == 10:
                 if now.minute != last_alerted_minute:
-                    print(f"[{now.strftime('%H:%M:%S')}] ได้จังหวะเวลาล็อก! กำลังคำนวณสัญญาณ...")
+                    print(f"[{now.strftime('%H:%M:%S')}] ถึงเป้าหมายเวลาล็อกใหม่! กำลังประมวลผล...")
                     
                     df1 = get_binance_data(interval="1m")
                     df3 = get_binance_data(interval="3m")
@@ -114,7 +114,7 @@ def main():
                         last_alerted_minute = now.minute
                         print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสำเร็จในรอบนาทีที่ {now.minute}")
             
-            # เช็กเวลาถี่ยิบทุก 0.5 วิ ไม่มีพลาดวินาทีที่ 00
+            # เช็กเวลาถี่ยิบทุก 0.5 วิ เพื่อความแม่นยำไม่พลาดวินาทีที่ 10
             time.sleep(0.5)
             
         except Exception as e:
