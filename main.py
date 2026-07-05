@@ -57,14 +57,14 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap ปรับเวลาเริ่มต้นช้าลงอีก 25 วิ เรียบร้อยแล้ว! 🚀"
+    startup_msg = "✅ บอท PancakeSwap ปรับเวลาเริ่มต้นช้าลงอีก 20 วิ (รวมเริ่มต้นหน่วง 45 วิ) เรียบร้อยแล้ว! 🚀"
     send_telegram_message(startup_msg)
     print("Bot started.")
     
     last_alerted_minute = -1
     
-    # 🛠 ตั้งค่าเริ่มต้นที่ 25 เพื่อให้บอทแจ้งเตือนช้าลงอีก 25 วินาทีตั้งแต่รอบแรก
-    accumulated_delay = 25  
+    # 🛠 ปรับค่าเริ่มต้นจาก 25 เป็น 45 เพื่อให้แจ้งเตือนช้าลงอีก 20 วินาทีตั้งแต่รอบแรก
+    accumulated_delay = 45  
 
     while True:
         now = datetime.now()
@@ -114,7 +114,7 @@ def main():
                     send_telegram_message(msg)
                     last_alerted_minute = now.minute
                     
-                    # หลังส่งเสร็จในแต่ละรอบ ให้บวกเพิ่มอีก 10 วินาทีตามตรรกะเดิม เพื่อกันเวลาดีเลย์สะสมของเว็บ
+                    # หลังส่งเสร็จในแต่ละรอบ ให้บวกเพิ่มอีก 10 วินาทีตามตรรกะเดิม
                     accumulated_delay += 10
                     print(f"[{now.strftime('%H:%M:%S')}] ส่งสัญญาณแล้ว -> ปรับเพิ่มเวลาหน่วงรอบถัดไปเป็น +{accumulated_delay} วิ")
                     
