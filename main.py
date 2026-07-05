@@ -11,7 +11,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 def get_binance_data(interval="1m", limit=100):
     url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
     try:
-        response = requests.get(url).json()
+        response = requests.get(url, timeout=5).json()
         if isinstance(response, dict) and 'code' in response:
             return pd.DataFrame()
         df = pd.DataFrame(response, columns=[
@@ -67,12 +67,15 @@ def analyze_trend(df_1m, df_3m):
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text}
-    requests.post(url, data=payload)
+    try:
+        requests.post(url, data=payload, timeout=5)
+    except:
+        pass
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v19 (ระบบ Real-time Clock Sync 1m+3m) เริ่มงานแล้วครับ! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v22 (ระบบดีเลย์ตรงเวลาเครื่อง หน่วง 2 นาทีครึ่ง) พร้อมลุยแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Monitoring time continuously...")
+    print("Bot started. Monitoring time by simple local clock...")
     
     last_alerted_minute = -1
 
@@ -80,11 +83,11 @@ def main():
         try:
             now = datetime.now()
             
-            # 🎯 ล็อกเวลาชนกับหน้าปัดนาฬิกาตรงๆ: นาทีลงท้ายด้วย 4 และ 9 ณ วินาทีที่ 25 เป๊ะๆ
-            if (now.minute % 5 == 4) and now.second == 25:
-                # ป้องกันการส่งซ้ำในนาทีเดียวกัน
+            # 🎯 ล็อกเวลาเครื่องตรงๆ: หน่วงเวลาเพิ่ม 2 นาทีครึ่งจากล็อกนาทีที่ 4 และ 9 
+            # (ขยับมาทำงานที่ นาทีลงท้ายด้วย 1 และ 6 ณ วินาทีที่ 00 เป๊ะๆ แทนการไปยุ่งกับวินาทีลอยๆ)
+            if (now.minute % 5 == 1 or now.minute % 5 == 6) and now.second == 0:
                 if now.minute != last_alerted_minute:
-                    print(f"[{now.strftime('%H:%M:%S')}] ถึงเป้าหมายเวลาล็อก! กำลังคำนวณสัญญาน...")
+                    print(f"[{now.strftime('%H:%M:%S')}] ได้จังหวะเวลาล็อก! กำลังคำนวณสัญญาณ...")
                     
                     df1 = get_binance_data(interval="1m")
                     df3 = get_binance_data(interval="3m")
@@ -103,15 +106,15 @@ def main():
                             f"🎯 คาดการณ์ราคาล็อก: ${est_lock:.4f}\n"
                             f"📊 {reason}\n"
                             f"━━━━━━━━━━━━━━━\n"
-                            f"⏳ เหลือเวลาแทง: ~35s (ระบบบวกหน่วง 10 วิรอยต่อให้แล้ว)\n"
+                            f"⏳ เหลือเวลาแทงก่อนปุ่มปิด: ~30s\n"
                             f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
                         )
                         
                         send_telegram_message(msg)
                         last_alerted_minute = now.minute
-                        print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสัญญาณสำเร็จรอบนาทีที่ {now.minute}")
+                        print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสำเร็จในรอบนาทีที่ {now.minute}")
             
-            # ปล่อยให้ลูปตื่นมาเช็กเวลาทุก 0.5 วินาที เพื่อไม่ให้พลาดวินาทีที่ 25
+            # เช็กเวลาถี่ยิบทุก 0.5 วิ ไม่มีพลาดวินาทีที่ 00
             time.sleep(0.5)
             
         except Exception as e:
