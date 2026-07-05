@@ -6,106 +6,104 @@ from datetime import datetime
 import os
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-def get_binance_data(interval="1m", limit=100):
-    url = f"https://data-api.binance.vision/api/v3/klines?symbol=BNBUSDT&interval={interval}&limit={limit}"
+def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
+    url = f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
     try:
-        data = requests.get(url, timeout=10).json()
-        df = pd.DataFrame(data, columns=['ts','o','h','l','close','v','ct','q','t','tb','tq','i'])
-        for col in ['close','h','l','o','v']:
-            df[col] = pd.to_numeric(df[col])
-        df['ema_20'] = ta.trend.EMAIndicator(df['close'], window=20).ema_indicator()
-        df['rsi']    = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        stoch        = ta.momentum.StochasticOscillator(df['h'], df['l'], df['close'])
-        df['stoch']  = stoch.stoch()
+        response = requests.get(url).json()
+        
+        if isinstance(response, dict) and 'code' in response:
+            print(f"Binance API Error: {response}")
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(response, columns=[
+            'timestamp', 'open', 'high', 'low', 'close', 'volume',
+            'close_time', 'quote_asset_volume', 'trades',
+            'taker_buy_base', 'taker_buy_quote', 'ignore'
+        ])
+        df['close'] = pd.to_numeric(df['close'])
         return df
     except Exception as e:
-        print(f"[ERROR] Binance: {e}")
+        print(f"Fetch Error: {e}")
         return pd.DataFrame()
 
-def get_signal(df_1m, df_3m):
-    l1 = df_1m.iloc[-1]
-    l3 = df_3m.iloc[-1]
-    required = ['close','ema_20','rsi','stoch']
-    if any(pd.isna(l1[c]) for c in required) or pd.isna(l3['ema_20']):
-        return "NEUTRAL ⚪", l1['close'], "ข้อมูลไม่พอ"
-    price = l1['close']
-    ema_diff_3m = (l3['close'] - l3['ema_20']) / l3['ema_20'] * 100
-    ema_diff_1m = (l1['close'] - l1['ema_20']) / l1['ema_20'] * 100
+def analyze_trend(df):
+    df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+    df['ema_9'] = ta.trend.EMAIndicator(df['close'], window=9).ema_indicator()
+    df['ema_21'] = ta.trend.EMAIndicator(df['close'], window=21).ema_indicator()
+    df['ema_50'] = ta.trend.EMAIndicator(df['close'], window=50).ema_indicator()
     
-    if (ema_diff_3m > -0.05 and ema_diff_1m > -0.05 and 35 < l1['rsi'] < 78 and l1['stoch'] < 88):
-        reason = "\n".join([
-            "✅ ราคาใกล้/เหนือ EMA20",
-            f"✅ RSI: {l1['rsi']:.1f}",
-            f"✅ Stoch: {l1['stoch']:.1f}",
-            f"📈 EMA diff: {ema_diff_1m:+.3f}%"
-        ])
-        return "UP 🟢", price, reason
-    elif (ema_diff_3m < 0.05 and ema_diff_1m < 0.05 and 22 < l1['rsi'] < 65 and l1['stoch'] > 12):
-        reason = "\n".join([
-            "✅ ราคาใกล้/ต่ำกว่า EMA20",
-            f"✅ RSI: {l1['rsi']:.1f}",
-            f"✅ Stoch: {l1['stoch']:.1f}",
-            f"📉 EMA diff: {ema_diff_1m:+.3f}%"
-        ])
-        return "DOWN 🔴", price, reason
-    miss = [
-        f"RSI: {l1['rsi']:.1f} | Stoch: {l1['stoch']:.1f}",
-        f"EMA diff 1m: {ema_diff_1m:+.3f}% | 3m: {ema_diff_3m:+.3f}%"
-    ]
-    return "NEUTRAL ⚪", price, "⏸ สัญญาณยังไม่ชัด:\n" + "\n".join(miss)
+    macd = ta.trend.MACD(df['close'])
+    df['macd_line'] = macd.macd()
+    df['macd_signal'] = macd.macd_signal()
+
+    latest = df.iloc[-1]
+    signal = "WAIT"
+    
+    if (latest['close'] > latest['ema_50'] and 
+        latest['ema_9'] > latest['ema_21'] and 
+        latest['macd_line'] > latest['macd_signal'] and 
+        45 <= latest['rsi'] <= 65):
+        signal = "UP 🟢"
+        
+    elif (latest['close'] < latest['ema_50'] and 
+          latest['ema_9'] < latest['ema_21'] and 
+          latest['macd_line'] < latest['macd_signal'] and 
+          35 <= latest['rsi'] <= 55):
+        signal = "DOWN 🔴"
+        
+    return signal, latest['close'], latest['rsi']
 
 def send_telegram_message(text):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
-                      data={'chat_id': TELEGRAM_CHAT_ID, 'text': text}, timeout=10)
-    except Exception as e:
-        print(f"[ERROR] Telegram: {e}")
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': text}
+    res = requests.post(url, data=payload).json()
+    if not res.get("ok"):
+        print(f"Telegram Error: {res}")
 
 def main():
-    send_telegram_message("✅ Bot โละระบบเวลาเดิมทิ้ง ใช้การจับเวลาจากนาฬิกาเป๊ะๆ แล้วครับ! 🚀")
-
+    startup_msg = "✅ บอท PancakeSwap (แจ้งเตือนทุกรอบ) เริ่มทำงานแล้ว!\nระบบกำลังสแตนด์บายรอจับสัญญาณครับ 🚀"
+    send_telegram_message(startup_msg)
+    print("Bot started. Startup message sent.")
+    
     while True:
         now = datetime.now()
-        
-        # 📌 หัวใจสำคัญ: สั่งทำงานที่ นาทีที่ 4 (และ 9) วินาทีที่ 30 เป๊ะๆ (เช่น 02:34:30)
-        if now.minute % 5 == 4 and now.second == 30: 
+        if now.minute % 5 == 4 and now.second == 30:
             try:
-                df1 = get_binance_data("1m")
-                df3 = get_binance_data("3m")
-
-                if not df1.empty and not df3.empty:
-                    signal, price, reason = get_signal(df1, df3)
-
-                    if "UP" in signal:
-                        action = "👆 แนะนำ: กด ENTER UP"
-                    elif "DOWN" in signal:
-                        action = "👇 แนะนำ: กด ENTER DOWN"
-                    else:
-                        action = "⏸ แนะนำ: ข้ามรอบนี้"
-
-                    # แสดงผลเวลา 30 วิ + บวกเพิ่ม 10 วิ ในข้อความ ตามที่คุณสั่ง
-                    display_secs = 30 + 10 
+                df = get_binance_data()
+                
+                if df.empty:
+                    print(f"[{now.strftime('%H:%M:%S')}] ไม่สามารถดึงกราฟได้ ข้ามรอบนี้ไปก่อน")
+                    time.sleep(60)
+                    continue
                     
+                signal, price, rsi = analyze_trend(df)
+                
+                if signal != "WAIT":
                     msg = (
-                        f"🔮 PancakeSwap Prediction\n"
-                        f"━━━━━━━━━━━━━━━\n"
+                        f"🔮 PancakeSwap 5m Prediction\n"
                         f"📍 สัญญาณ: {signal}\n"
-                        f"{action}\n"
-                        f"💰 ราคา: ${price:.4f}\n"
-                        f"📊 {reason}\n"
-                        f"━━━━━━━━━━━━━━━\n"
-                        f"⏳ เหลือเวลาแทง: ~{display_secs}s\n"
-                        f"🕐 เวลาจริง: {now.strftime('%H:%M:%S')}"
+                        f"💰 ราคา BNB: ${price:.2f}\n"
+                        f"📊 RSI (1m): {rsi:.2f}\n"
+                        f"⏳ รีบลงเดิมพันภายใน 20 วินาที!"
                     )
                     send_telegram_message(msg)
+                    print(f"[{now.strftime('%H:%M:%S')}] Sent Signal: {signal}")
+                else:
+                    # เพิ่มส่วนนี้เข้าไป เพื่อแจ้งเตือนตอน Skip
+                    msg = (
+                        f"⏸ PancakeSwap 5m Prediction\n"
+                        f"📍 สัญญาณ: ข้ามรอบนี้ (ทรงกราฟไม่ชัวร์)\n"
+                        f"💰 ราคาปัจจุบัน: ${price:.2f}\n"
+                        f"📊 RSI (1m): {rsi:.2f}"
+                    )
+                    send_telegram_message(msg)
+                    print(f"[{now.strftime('%H:%M:%S')}] แจ้งเตือนข้ามรอบนี้ (Skipped).")
                     
-                time.sleep(70) # หยุด 70 วิ กันบอทส่งซ้ำในรอบเดิม
-                
+                time.sleep(60)
             except Exception as e:
-                print(f"[ERROR] main: {e}")
-                send_telegram_message(f"❌ Error: {e}")
+                print(f"Error: {e}")
                 time.sleep(5)
         else:
             time.sleep(1)
