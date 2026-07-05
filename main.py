@@ -21,6 +21,7 @@ def get_binance_data(symbol="BNBUSDT", interval="1m", limit=100):
         ])
         df['close'] = pd.to_numeric(df['close'])
         df['open'] = pd.to_numeric(df['open'])
+        df['timestamp'] = pd.to_numeric(df['timestamp'])
         return df
     except:
         return pd.DataFrame()
@@ -57,30 +58,26 @@ def send_telegram_message(text):
     requests.post(url, data=payload)
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap ปรับช้าลงอีก 1.30 นาที (รวมเริ่มต้นหน่วง 155 วิ) เรียบร้อยแล้ว! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v15 (ล็อกเป้าหมาย 30 วิสุดท้ายถาวร) เริ่มทำงานแล้วครับ! 🚀"
     send_telegram_message(startup_msg)
     print("Bot started.")
     
-    last_alerted_minute = -1
-    
-    # 🛠 ปรับค่าเริ่มต้นจาก 65 เป็น 155 เพื่อให้แจ้งเตือนช้าลงอีก 1 นาที 30 วินาที
-    accumulated_delay = 155  
+    last_alerted_round = -1
 
     while True:
-        now = datetime.now()
-        
-        target_second = accumulated_delay
-        check_minute = now.minute
-        
-        # จัดการนาทีและวินาทีอัตโนมัติ (155 วินาที จะปัดเป็น +2 นาที กับอีก 35 วินาที)
-        if target_second >= 60:
-            check_minute += (target_second // 60)
-            target_second = target_second % 60
-
-        # ทำงานตามบล็อกรอบเวลาหลัก 5 นาที
-        if (check_minute % 5 == 1 or check_minute % 5 == 6) and now.second == target_second:
-            if now.minute != last_alerted_minute:
-                try:
+        try:
+            now = datetime.now()
+            
+            # คำนวณหาตำแหน่งวินาทีในรอบ 5 นาทีปัจจุบันของนาฬิกาเครื่อง (0 - 299 วินาที)
+            current_secs_in_round = (now.minute % 5) * 60 + now.second
+            
+            # 🎯 ล็อกเป้าหมาย: บอทจะส่งสัญญาณก็ต่อเมื่อเวลาของรอบเดินไปถึงวินาทีที่ 265 
+            # ซึ่งในจังหวะนี้หน้าเว็บของพี่จะเหลือเวลานับถอยหลังประมาณ 30-35 วินาทีสุดท้ายพอดีเป๊ะ
+            if current_secs_in_round == 265:
+                # คำนวณ ID ของรอบปัจจุบันเพื่อป้องกันการส่งซ้ำ
+                current_round_id = (now.hour * 12) + (now.minute // 5)
+                
+                if current_round_id != last_alerted_round:
                     df = get_binance_data()
                     if df.empty:
                         continue
@@ -96,7 +93,7 @@ def main():
                             f"🎯 คาดการณ์ราคาสัญญาณล็อก: ${est_lock:.2f}\n"
                             f"📊 RSI (1m): {rsi:.2f}\n"
                             f"━━━━━━━━━━━━━━━\n"
-                            f"⏳ รีบลงเดิมพันด่วน!\n"
+                            f"⏳ รีบลงเดิมพันด่วน! (เหลือประมาณ 30 วิ)\n"
                             f"🕐 เวลาส่ง: {now.strftime('%H:%M:%S')}"
                         )
                     else:
@@ -112,18 +109,16 @@ def main():
                         )
                     
                     send_telegram_message(msg)
-                    last_alerted_minute = now.minute
+                    last_alerted_round = current_round_id
                     
-                    # หลังส่งเสร็จในแต่ละรอบ ให้บวกเพิ่มอีก 10 วินาทีตามตรรกะเดิม
-                    accumulated_delay += 10
-                    print(f"[{now.strftime('%H:%M:%S')}] ส่งสัญญาณแล้ว -> ปรับเพิ่มเวลาหน่วงรอบถัดไปเป็น +{accumulated_delay} วิ")
+                    # พักระบบ 10 วินาทีเพื่อป้องกันลูปวินาทีเดิมทำงานซ้ำ
+                    time.sleep(10)
                     
-                    time.sleep(70)  
-                except Exception as e:
-                    print(f"Error: {e}")
-                    time.sleep(5)
-        
-        time.sleep(0.5)
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(2)
+            
+        time.sleep(0.2)
 
 if __name__ == "__main__":
     main()
