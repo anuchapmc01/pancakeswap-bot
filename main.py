@@ -71,14 +71,14 @@ def send_telegram_message(text):
         pass
 
 def main():
-    startup_msg = "✅ บอท PancakeSwap v24 (ระบบหน่วง 10 วิหลังส่ง + นับถอยหลังตามสั่ง) เริ่มงานแล้วครับ! 🚀"
+    startup_msg = "✅ บอท PancakeSwap v25 (ดีเลย์รอบแรก 2.30 นาที + หน่วง 10 วิหลังส่ง) พร้อมลุยครับ! 🚀"
     send_telegram_message(startup_msg)
-    print("Bot started. Waiting for first alignment at XX:X2:10 or XX:X7:10...")
+    print("Bot started. Waiting for first alignment at XX:X4:40 or XX:X9:40...")
     
-    # 🎯 ตั้งหลักรอบแรกให้ตรงนาทีลงท้ายด้วย 2 หรือ 7 ณ วินาทีที่ 10 ของเครื่องก่อน
+    # 🎯 1. ตั้งหลักรอบแรก: ปรับดีเลย์ออกไปอีก 2 นาทีครึ่ง ขยับมาเริ่มที่ นาทีลงท้ายด้วย 4 หรือ 9 ณ วินาทีที่ 40 ของเครื่อง
     while True:
         now = datetime.now()
-        if (now.minute % 5 == 2 or now.minute % 5 == 7) and now.second == 10:
+        if (now.minute % 5 == 4 or now.minute % 5 == 9) and now.second == 40:
             break
         time.sleep(0.5)
 
@@ -111,11 +111,11 @@ def main():
                 send_telegram_message(msg)
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] ส่งสัญญาณสำเร็จ")
                 
-                # 📌 1. แจ้งเตือนเสร็จปุ๊บ -> สั่งนับหน่วง 10 วินาทีตามที่พี่ทักท้วงทันที!
+                # 📌 2. ส่งเสร็จปุ๊บ -> หน่วงรอยต่อเคลียร์ระบบเว็บ 10 วินาทีทันทีตามสั่ง
                 print("-> [ACTION] เริ่มนับหน่วงเวลาช่วงปิดระบบเว็บ 10 วินาที...")
                 time.sleep(10)
                 
-                # 📌 2. พอครบ 10 วิปุ๊บ -> เริ่มลูปรอนับถอยหลังยาวอีก 260 วินาที เพื่อไปโผล่ที่จุดเดิมในรอบถัดไป
+                # 📌 3. ครบ 10 วิ -> นับถอยหลังต่ออีก 260 วินาที เพื่อล็อกจังหวะเข้าทำรอบถัดไป
                 print("-> [ACTION] ครบ 10 วิ เริ่มเข้าลูปนับถอยหลังอีก 260 วินาทีเพื่อรอส่งรอบหน้า...")
                 time.sleep(260)
             else:
